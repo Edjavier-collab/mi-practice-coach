@@ -1,0 +1,7 @@
+{
+  "name": "MI Practice Coach",
+  "description": "An AI-powered conversational partner for medical students and residents to practice Motivational Interviewing (MI) techniques with simulated patients.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
