@@ -4,6 +4,33 @@ import { PatientProfile, ChatMessage, Feedback, UserTier, Session, CoachingSumma
 // Check if we're in development mode
 const isDevelopment = import.meta.env.DEV || import.meta.env.MODE === 'development';
 
+// Check if Gemini API key is configured
+export const isGeminiConfigured = (): boolean => {
+    const apiKey = import.meta.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+    return !!(apiKey && apiKey.trim());
+};
+
+// Mock patient responses for testing without API key
+const MOCK_RESPONSES = [
+    "That's interesting. Tell me more about what's been going on.",
+    "I appreciate you asking. It's been challenging, but I'm managing.",
+    "I'm not sure how to respond to that. Can you help me understand?",
+    "Yeah, I've thought about that. It's just complicated, you know?",
+    "That makes sense. I hadn't looked at it that way before.",
+    "I understand what you're saying. It's not easy for me though.",
+    "I've been dealing with this for a while now.",
+    "Thanks for listening. Not many people ask me about this.",
+    "I'll think about what you've said. It's helpful talking this through.",
+    "I'm doing my best, even when it feels like I'm not making progress."
+];
+
+// Get a mock response based on user input
+const getMockResponse = (userMessage: string): string => {
+    // Simple hash function to get consistent responses for similar inputs
+    const hash = userMessage.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return MOCK_RESPONSES[hash % MOCK_RESPONSES.length];
+};
+
 // Get API key from environment variables with enhanced validation
 const getApiKey = (): string => {
     const apiKey = import.meta.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
@@ -104,6 +131,20 @@ const getAI = (): GoogleGenAI => {
 export const createChatSession = (patient: PatientProfile): Chat => {
     console.log('[createChatSession] Creating chat for patient:', patient.name);
     
+    if (!isGeminiConfigured()) {
+        console.warn('[createChatSession] Gemini API not configured. Using mock chat mode.');
+        // Return a mock chat object that will use mock responses
+        return {
+            sendMessage: async (message: { message: string } | string) => {
+                const text = typeof message === 'string' ? message : message.message;
+                return {
+                    text: getMockResponse(text),
+                    candidates: []
+                } as GenerateContentResponse;
+            }
+        } as unknown as Chat;
+    }
+    
     const systemInstruction = `You are a patient in a medical setting. You MUST roleplay according to the following detailed profile.
     
     PATIENT PROFILE:
@@ -136,6 +177,12 @@ export const createChatSession = (patient: PatientProfile): Chat => {
 
 export const getPatientResponse = async (chat: Chat, message: string): Promise<string> => {
     try {
+        // If Gemini not configured, use mock response
+        if (!isGeminiConfigured()) {
+            console.log('[getPatientResponse] Using mock response (Gemini API not configured)');
+            return getMockResponse(message);
+        }
+        
         // Validate API key before making API call
         validateApiKey();
         
@@ -266,6 +313,25 @@ export const getFeedbackForTranscript = async (transcript: ChatMessage[], patien
     const isPremium = userTier === UserTier.Premium;
 
     try {
+        // If Gemini not configured, return mock feedback
+        if (!isGeminiConfigured()) {
+            console.log('[getFeedbackForTranscript] Gemini API not configured. Returning mock feedback.');
+            if (isPremium) {
+                return {
+                    keyTakeaway: "Mock Mode: You demonstrated engagement with the patient's perspective.",
+                    empathyScore: 7,
+                    whatWentRight: "You maintained a conversational tone throughout the practice session.",
+                    constructiveFeedback: "In your next session, try using more open-ended questions to explore the patient's motivations.",
+                    keySkillsUsed: ["Open Questions", "Reflections"],
+                    nextPracticeFocus: "For your next session, focus on asking at least three open-ended questions that explore the patient's values."
+                };
+            } else {
+                return {
+                    whatWentRight: "You engaged authentically with the patient and maintained a supportive tone throughout."
+                };
+            }
+        }
+        
         // Validate API key before making API call
         validateApiKey();
         
@@ -383,6 +449,18 @@ export const generateCoachingSummary = async (sessions: Session[]): Promise<Coac
 
     // 3. Call the Gemini API and handle potential errors.
     try {
+        // If Gemini not configured, return mock coaching summary
+        if (!isGeminiConfigured()) {
+            console.log('[generateCoachingSummary] Gemini API not configured. Returning mock coaching summary.');
+            return {
+                totalSessions: sessionSummaries.length,
+                dateRange: `${firstSessionDate} to ${lastSessionDate}`,
+                strengthsAndTrends: `* You completed ${sessionSummaries.length} practice sessions\n* Consistently maintained patient engagement throughout sessions\n* Demonstrated ability to adapt your approach across different patient scenarios`,
+                areasForFocus: `* Developing more complex reflections to deepen patient conversations\n* Using open-ended questions strategically to explore patient motivations`,
+                summaryAndNextSteps: `You're making great progress in your Motivational Interviewing practice! Your commitment to consistent practice and varied patient interactions shows real dedication. For your next session, try focusing on one specific MI skill—perhaps using more reflective listening statements to validate the patient's experience.`
+            };
+        }
+        
         // Validate API key before making API call
         validateApiKey();
         

@@ -15,6 +15,29 @@ interface AuthContextType {
 // Create the context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Mock user helper - creates a mock Supabase User object
+const createMockUser = (email: string): User => {
+    return {
+        id: `mock-${email.replace(/[^a-zA-Z0-9]/g, '-')}`,
+        email: email,
+        created_at: new Date().toISOString(),
+        app_metadata: {},
+        user_metadata: {},
+        aud: 'authenticated',
+        confirmation_sent_at: null,
+        recovery_sent_at: null,
+        email_confirmed_at: new Date().toISOString(),
+        invited_at: null,
+        action_link: null,
+        phone: null,
+        phone_confirmed_at: null,
+        confirmed_at: new Date().toISOString(),
+        last_sign_in_at: new Date().toISOString(),
+        role: 'authenticated',
+        updated_at: new Date().toISOString(),
+    } as User;
+};
+
 // Auth Provider Component
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(null);
@@ -26,8 +49,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Check if Supabase is configured
         if (!isSupabaseConfigured()) {
-            console.warn('[AuthProvider] Supabase is not configured. Auth features will be unavailable.');
-            console.warn('[AuthProvider] Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env.local file.');
+            console.warn('[AuthProvider] Supabase is not configured. Using mock authentication mode.');
+            console.warn('[AuthProvider] Mock users will be stored in localStorage.');
+            
+            // Try to restore mock user from localStorage
+            const mockUserData = localStorage.getItem('mock_user');
+            if (mockUserData) {
+                try {
+                    const parsed = JSON.parse(mockUserData);
+                    setUser(createMockUser(parsed.email));
+                    console.log('[AuthProvider] Restored mock user from localStorage');
+                } catch (error) {
+                    console.error('[AuthProvider] Failed to restore mock user:', error);
+                }
+            }
+            
             setLoading(false);
             return;
         }
@@ -72,9 +108,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setLoading(true);
 
             if (!isSupabaseConfigured()) {
-                const errorMsg = 'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env.local file.';
-                console.error('[AuthProvider]', errorMsg);
-                throw new Error(errorMsg);
+                // Mock authentication - accept any email/password combo
+                console.log('[AuthProvider] Using mock authentication');
+                
+                // Simulate network delay
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // In mock mode, accept any email/password
+                const mockUser = createMockUser(email);
+                setUser(mockUser);
+                
+                // Store in localStorage for persistence
+                localStorage.setItem('mock_user', JSON.stringify({ email }));
+                
+                console.log('[AuthProvider] Mock sign in successful');
+                return;
             }
 
             const supabase = getSupabaseClient();
@@ -107,9 +155,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setLoading(true);
 
             if (!isSupabaseConfigured()) {
-                const errorMsg = 'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env.local file.';
-                console.error('[AuthProvider]', errorMsg);
-                throw new Error(errorMsg);
+                // Mock sign up - accept any email/password combo
+                console.log('[AuthProvider] Using mock sign up');
+                
+                // Simulate network delay
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // In mock mode, accept any email/password
+                const mockUser = createMockUser(email);
+                setUser(mockUser);
+                
+                // Store in localStorage for persistence
+                localStorage.setItem('mock_user', JSON.stringify({ email }));
+                
+                console.log('[AuthProvider] Mock sign up successful');
+                return;
             }
 
             const supabase = getSupabaseClient();
@@ -144,6 +204,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (!isSupabaseConfigured()) {
                 console.warn('[AuthProvider] Supabase not configured, clearing local user state');
                 setUser(null);
+                localStorage.removeItem('mock_user');
                 return;
             }
 
@@ -175,9 +236,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setLoading(true);
 
             if (!isSupabaseConfigured()) {
-                const errorMsg = 'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env.local file.';
-                console.error('[AuthProvider]', errorMsg);
-                throw new Error(errorMsg);
+                // Mock password reset - just log it
+                console.log('[AuthProvider] Mock password reset - email sent to:', email);
+                console.log('[AuthProvider] In mock mode, password reset is simulated.');
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return;
             }
 
             const supabase = getSupabaseClient();
