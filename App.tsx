@@ -4,7 +4,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { UserTier, View, PatientProfile, Session, Feedback, ChatMessage, StageOfChange, PatientProfileFilters, DifficultyLevel, CoachingSummary } from './types';
 import { generatePatientProfile } from './services/patientService';
 import { generateCoachingSummary } from './services/geminiService';
+import { saveSession, getUserSessions } from './services/databaseService';
+import { canStartSession, getRemainingFreeSessions } from './services/subscriptionService';
 import { PATIENT_PROFILE_TEMPLATES, STAGE_DESCRIPTIONS } from './constants';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Dashboard from './components/Dashboard';
 import PracticeView from './components/PracticeView';
 import FeedbackView from './components/FeedbackView';
@@ -157,10 +160,13 @@ const ScenarioSelectionView: React.FC<ScenarioSelectionViewProps> = ({ onBack, o
     );
 };
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { user, loading: authLoading, signOut } = useAuth();
   const [userTier, setUserTier] = useState<UserTier>(UserTier.Free);
   const [view, setView] = useState<View>(View.Login);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [remainingFreeSessions, setRemainingFreeSessions] = useState<number | null>(null);
   const [currentPatient, setCurrentPatient] = useState<PatientProfile | null>(null);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
@@ -169,26 +175,30 @@ const App: React.FC = () => {
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
 
-  // Load user tier and session history from localStorage when the app starts.
+  // Navigate to dashboard when user logs in, or to login when user logs out
+  useEffect(() => {
+    if (authLoading) {
+      return; // Don't change view while loading
+    }
+
+    if (user) {
+      // User is logged in, navigate to dashboard if on login-related screens
+      if (view === View.Login || view === View.ForgotPassword) {
+        setView(View.Dashboard);
+      }
+    } else {
+      // User is not logged in, show login screen (unless already there)
+      if (view !== View.Login && view !== View.ForgotPassword) {
+        setView(View.Login);
+      }
+    }
+  }, [user, authLoading, view]);
+
+  // Load user tier from localStorage when the app starts.
   useEffect(() => {
     // Check if onboarding has been completed.
     const onboardingComplete = localStorage.getItem('mi-coach-onboarding-complete');
     setShowOnboarding(onboardingComplete !== 'true');
-
-    // Load saved sessions.
-    const savedSessions = localStorage.getItem('mi-coach-sessions');
-    if (savedSessions) {
-      try {
-        setSessions(JSON.parse(savedSessions));
-// FIX: The original catch block was missing curly braces, causing a major parsing error
-// that broke the scope of the entire App component. This resulted in a cascade of "Cannot find name"
-// errors for all state variables and setters. Adding the `{` and `}` for the catch block resolves all these issues.
-      } catch (error) {
-        console.error("Failed to parse sessions from localStorage.", error);
-        // If data is corrupted, clear it.
-        localStorage.removeItem('mi-coach-sessions');
-      }
-    }
 
     // Load saved user tier.
     const savedTier = localStorage.getItem('mi-coach-tier') as UserTier;
@@ -197,30 +207,98 @@ const App: React.FC = () => {
     }
   }, []); // Empty dependency array ensures this runs only once on mount.
 
+  // Load sessions from Supabase when user is authenticated
+  useEffect(() => {
+    if (!user || authLoading) {
+      return;
+    }
+
+    const loadSessions = async () => {
+      setSessionsLoading(true);
+      try {
+        // Try to fetch from Supabase
+        const supabaseSessions = await getUserSessions(user.id);
+        setSessions(supabaseSessions);
+        
+        // Update remaining free sessions if user is on free tier
+        if (userTier === UserTier.Free) {
+          const remaining = await getRemainingFreeSessions(user.id);
+          setRemainingFreeSessions(remaining);
+        } else {
+          setRemainingFreeSessions(null); // Premium users don't have limits
+        }
+        
+        // If no sessions in Supabase, try to migrate from localStorage
+        if (supabaseSessions.length === 0) {
+          const savedSessions = localStorage.getItem('mi-coach-sessions');
+          if (savedSessions) {
+            try {
+              const localSessions = JSON.parse(savedSessions) as Session[];
+              // Optionally migrate old sessions to Supabase (could be done in background)
+              console.log('[App] Found', localSessions.length, 'sessions in localStorage (migration may be needed)');
+            } catch (error) {
+              console.error("[App] Failed to parse sessions from localStorage:", error);
+              localStorage.removeItem('mi-coach-sessions');
+            }
+          }
+        }
+      } catch (error) {
+        console.error("[App] Failed to load sessions from Supabase, falling back to localStorage:", error);
+        // Fallback to localStorage if Supabase fails
+        const savedSessions = localStorage.getItem('mi-coach-sessions');
+        if (savedSessions) {
+          try {
+            const localSessions = JSON.parse(savedSessions) as Session[];
+            setSessions(localSessions);
+            
+            // Calculate remaining sessions from local data
+            if (userTier === UserTier.Free) {
+              const now = new Date();
+              const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+              const freeSessionsThisMonth = localSessions.filter(s => {
+                const sessionDate = new Date(s.date);
+                return s.tier === UserTier.Free && sessionDate >= monthStart && sessionDate <= now;
+              }).length;
+              setRemainingFreeSessions(Math.max(0, 3 - freeSessionsThisMonth));
+            }
+          } catch (parseError) {
+            console.error("[App] Failed to parse sessions from localStorage:", parseError);
+            localStorage.removeItem('mi-coach-sessions');
+          }
+        }
+      } finally {
+        setSessionsLoading(false);
+      }
+    };
+
+    loadSessions();
+  }, [user, authLoading, userTier]);
+
   const handleOnboardingFinish = () => {
     localStorage.setItem('mi-coach-onboarding-complete', 'true');
     setShowOnboarding(false);
     setView(View.Login);
   };
 
-  // A function to save sessions to state and localStorage.
+  // A function to update sessions in state (localStorage writes removed - using Supabase)
   const saveSessions = useCallback((updatedSessions: Session[]) => {
     setSessions(updatedSessions);
-    localStorage.setItem('mi-coach-sessions', JSON.stringify(updatedSessions));
+    // Note: localStorage writes removed - sessions are now saved to Supabase
   }, []);
 
-  const handleStartPractice = () => {
-    const freeSessionsThisMonth = sessions.filter(s => {
-      const sessionDate = new Date(s.date);
-      const now = new Date();
-      return s.tier === UserTier.Free && sessionDate.getMonth() === now.getMonth() && sessionDate.getFullYear() === now.getFullYear();
-    }).length;
+  const handleStartPractice = async () => {
+    if (!user) {
+      console.error('[App] Cannot start practice: user not authenticated');
+      return;
+    }
 
-    if (userTier === UserTier.Free && freeSessionsThisMonth >= 3) {
+    // Check if user can start a new session
+    const canStart = await canStartSession(user.id, userTier);
+    if (!canStart) {
       setView(View.Paywall);
       return;
     }
-    
+
     if (userTier === UserTier.Premium) {
       setView(View.ScenarioSelection);
     } else {
@@ -236,26 +314,46 @@ const App: React.FC = () => {
     setView(View.Practice);
   };
 
-  // Save the new session to localStorage when practice is finished.
-  const handleFinishPractice = (transcript: ChatMessage[], feedback: Feedback) => {
-    if (currentPatient) {
-      const newSession: Session = {
-        id: new Date().toISOString(),
-        date: new Date().toISOString(),
-        patient: currentPatient,
-        transcript,
-        feedback,
-        tier: userTier,
-      };
-      
-      const updatedSessions = [...sessions, newSession];
-      saveSessions(updatedSessions);
-      localStorage.setItem('mi-coach-session-count', updatedSessions.length.toString());
+  // Save the new session to Supabase when practice is finished.
+  const handleFinishPractice = async (transcript: ChatMessage[], feedback: Feedback) => {
+    if (!currentPatient || !user) {
+      console.error("[App] Cannot save session: missing patient or user");
+      return;
+    }
 
-      setCurrentSession(newSession);
-      setCoachingSummary(null); // Invalidate old summary
-      setCoachingSummaryError(null);
-      setView(View.Feedback);
+    const newSession: Session = {
+      id: new Date().toISOString(),
+      date: new Date().toISOString(),
+      patient: currentPatient,
+      transcript,
+      feedback,
+      tier: userTier,
+    };
+
+    // Optimistically update local state for immediate UI feedback
+    const updatedSessions = [...sessions, newSession];
+    saveSessions(updatedSessions);
+    localStorage.setItem('mi-coach-session-count', updatedSessions.length.toString());
+
+    setCurrentSession(newSession);
+    setCoachingSummary(null); // Invalidate old summary
+    setCoachingSummaryError(null);
+    setView(View.Feedback);
+
+    // Save to Supabase in the background
+    try {
+      await saveSession(newSession, user.id);
+      console.log('[App] Session saved to Supabase successfully');
+      
+      // Refresh remaining free sessions if user is on free tier
+      if (userTier === UserTier.Free) {
+        const remaining = await getRemainingFreeSessions(user.id);
+        setRemainingFreeSessions(remaining);
+      }
+    } catch (error) {
+      console.error('[App] Failed to save session to Supabase:', error);
+      // Session is already in local state, so UI remains functional
+      // User could be notified of sync failure if needed
     }
   };
   
@@ -324,10 +422,15 @@ const App: React.FC = () => {
 
   const handleNavigate = (targetView: View) => setView(targetView);
 
-  const handleLogout = () => {
-    // In a real app, this would clear authentication tokens.
-    // For this app, we'll just navigate back to the login screen.
-    setView(View.Login);
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      setView(View.Login);
+    } catch (error) {
+      console.error('[App] Logout failed:', error);
+      // Still navigate to login even if signOut fails
+      setView(View.Login);
+    }
   };
 
   // Save the new user tier to localStorage upon upgrade.
@@ -338,10 +441,32 @@ const App: React.FC = () => {
     setView(View.Dashboard); // Go back to dashboard after upgrading
   };
   
+  // Show loading state while auth is initializing
+  if (authLoading || showOnboarding === null) {
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-gray-600">Loading...</div>
+    </div>;
+  }
+
+  // Show onboarding if not completed
+  if (showOnboarding) {
+    return <Onboarding onFinish={handleOnboardingFinish} />;
+  }
+
+  // Show login screen if user is not authenticated
+  if (!user && !authLoading) {
+    return (
+      <>
+        {view === View.Login && <LoginView onLogin={() => {}} onNavigate={handleNavigate} />}
+        {view === View.ForgotPassword && <ForgotPasswordView onBack={() => setView(View.Login)} />}
+      </>
+    );
+  }
+
   const renderView = () => {
     switch (view) {
       case View.Login:
-        return <LoginView onLogin={() => setView(View.Dashboard)} onNavigate={handleNavigate} />;
+        return <LoginView onLogin={() => {}} onNavigate={handleNavigate} />;
       case View.ForgotPassword:
         return <ForgotPasswordView onBack={() => setView(View.Login)} />;
       case View.ScenarioSelection:
@@ -391,18 +516,11 @@ const App: React.FC = () => {
             onStartPractice={handleStartPractice} 
             userTier={userTier} 
             sessions={sessions}
+            remainingFreeSessions={remainingFreeSessions}
           />
         );
     }
   };
-
-  if (showOnboarding === null) {
-    return <div className="min-h-screen bg-gray-50"></div>; // Or a loading spinner
-  }
-
-  if (showOnboarding) {
-    return <Onboarding onFinish={handleOnboardingFinish} />;
-  }
 
   const viewsWithNavBar = [View.Dashboard, View.ResourceLibrary, View.Settings, View.Calendar];
   const isPremiumFeedback = view === View.Feedback && userTier === UserTier.Premium;
@@ -427,6 +545,14 @@ const App: React.FC = () => {
           <ReviewPrompt onClose={handleReviewPromptClose} />
       )}
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 };
 

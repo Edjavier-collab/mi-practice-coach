@@ -5,17 +5,21 @@ interface DashboardProps {
     onStartPractice: () => void;
     userTier: UserTier;
     sessions: Session[];
+    remainingFreeSessions: number | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onStartPractice, userTier, sessions }) => {
-    
-    const freeSessionsThisMonth = sessions.filter(s => {
-        const sessionDate = new Date(s.date);
-        const now = new Date();
-        return s.tier === UserTier.Free && sessionDate.getMonth() === now.getMonth() && sessionDate.getFullYear() === now.getFullYear();
-    }).length;
-
-    const freeSessionsRemaining = Math.max(0, 3 - freeSessionsThisMonth);
+const Dashboard: React.FC<DashboardProps> = ({ onStartPractice, userTier, sessions, remainingFreeSessions }) => {
+    // Calculate remaining sessions from prop if available, otherwise fallback to local calculation
+    const displayRemaining = remainingFreeSessions !== null 
+        ? remainingFreeSessions 
+        : (() => {
+            const freeSessionsThisMonth = sessions.filter(s => {
+                const sessionDate = new Date(s.date);
+                const now = new Date();
+                return s.tier === UserTier.Free && sessionDate.getMonth() === now.getMonth() && sessionDate.getFullYear() === now.getFullYear();
+            }).length;
+            return Math.max(0, 3 - freeSessionsThisMonth);
+        })();
 
     return (
         <div className="flex flex-col items-center justify-center text-center p-4 h-full">
@@ -37,7 +41,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onStartPractice, userTier, sessio
                 >
                     <span className="block text-lg">Start a New Practice</span>
                     {userTier === UserTier.Free && (
-                        <span className="block text-sm font-semibold text-yellow-300 mt-1">{freeSessionsRemaining} Practices Remaining</span>
+                        <span className="block text-sm font-semibold text-yellow-300 mt-1">{displayRemaining} Practices Remaining</span>
                     )}
                 </button>
             </div>
