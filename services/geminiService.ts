@@ -12,16 +12,18 @@ export const isGeminiConfigured = (): boolean => {
 
 // Mock patient responses for testing without API key
 const MOCK_RESPONSES = [
-    "That's interesting. Tell me more about what's been going on.",
-    "I appreciate you asking. It's been challenging, but I'm managing.",
-    "I'm not sure how to respond to that. Can you help me understand?",
-    "Yeah, I've thought about that. It's just complicated, you know?",
-    "That makes sense. I hadn't looked at it that way before.",
-    "I understand what you're saying. It's not easy for me though.",
-    "I've been dealing with this for a while now.",
-    "Thanks for listening. Not many people ask me about this.",
-    "I'll think about what you've said. It's helpful talking this through.",
-    "I'm doing my best, even when it feels like I'm not making progress."
+    "You know, I've never really thought about it that way before. I guess when you put it like that, it does sound pretty serious. I mean, I know things aren't perfect, but I always figured it would just... work itself out somehow. But now that you mention it, I'm not sure if that's realistic.",
+    "That's a fair point. I appreciate you asking that instead of just telling me what to do. Most people just tell me I need to change, but they don't really listen to what I'm going through. It's different when someone actually wants to understand my side of things.",
+    "I want to say yes, but honestly, I'm scared. Like, I know what I'm doing isn't working, but at least I know how it works. If I try something different and it doesn't work, then what? I don't know... I'm just worried I'll fail again, and that would be even worse.",
+    "Yeah, I've thought about that. It's just complicated, you know? On one hand, I can see how it would help. But on the other hand, there are so many obstacles. My job is crazy right now, my family's not supportive, and I just don't know if I have the energy to deal with this change on top of everything else.",
+    "I guess I never looked at it that way. I always blamed it on bad luck or other people, but maybe... maybe I have more control over this than I thought. It's kind of uncomfortable to think about it like that, because it means I'm responsible. But at the same time, if I'm responsible, then I could also fix it.",
+    "Um... I don't know. I'm not really sure where to start. Part of me wants to make a change, but part of me is terrified. Like, what if I try and fail? What if people think less of me? Or worse, what if I succeed but then I can't keep it up? I just don't know if I'm strong enough for this.",
+    "I've been dealing with this for a while now, and honestly, it's exhausting. Some days I feel like I'm making progress, and other days I feel like I'm back to square one. But I'm trying, you know? I'm really trying. I just wish it was easier or that I had more support.",
+    "Thanks for listening, really. Not many people ask me about this without judgment. It's nice to talk to someone who isn't going to lecture me or make me feel worse about myself. I already feel bad enough as it is.",
+    "I'll think about what you've said. It's actually been really helpful talking this through. Sometimes I get so caught up in my own head that I can't see things clearly. But hearing myself say it out loud, and having you reflect it back to me... it's making me wonder if maybe I could actually do this.",
+    "I'm doing my best, even when it feels like I'm not making progress. Some days are harder than others, and I know I'm not perfect, but I'm here and I'm trying. That has to count for something, right? I just need to figure out how to keep this momentum going.",
+    "I don't know, honestly. I feel like I'm stuck between wanting things to be different and being afraid that I can't actually make it happen. It's like I want to change, but I don't want to do the work. Does that make sense? I know it sounds lazy or something, but it's more complicated than that.",
+    "Look, I hear what you're saying, and I'm not trying to be defensive. It's just... this is hard for me to talk about. I don't usually open up like this, so it's making me uncomfortable. But I can tell you genuinely care, and that makes it easier. I'm just trying to figure out if I'm ready to actually do something about this."
 ];
 
 // Get a mock response based on user input
@@ -145,22 +147,89 @@ export const createChatSession = (patient: PatientProfile): Chat => {
         } as unknown as Chat;
     }
     
-    const systemInstruction = `You are a patient in a medical setting. You MUST roleplay according to the following detailed profile.
-    
-    PATIENT PROFILE:
-    - Name: ${patient.name}
-    - Age: ${patient.age}
-    - Background: ${patient.background}
-    - Presenting Problem: ${patient.presentingProblem}
-    - Relevant History: ${patient.history}
-    - Chief Complaint (in patient's own words): "${patient.chiefComplaint}"
-    - Current Stage of Change: '${patient.stageOfChange}'
+    const systemInstruction = `You are a patient in a medical setting. You MUST embody this character completely and authentically.
 
-    INSTRUCTIONS:
-    1.  You MUST respond and behave strictly according to your assigned profile, especially your 'Stage of Change'.
-    2.  Do not break character. Do not reveal you are an AI.
-    3.  Keep your responses concise and realistic for a patient in this situation.
-    4.  The user is a medical professional practicing Motivational Interviewing. Interact with them naturally based on your profile.`;
+PATIENT PROFILE:
+- Name: ${patient.name}
+- Age: ${patient.age}
+- Sex: ${patient.sex}
+- Background: ${patient.background}
+- Presenting Problem: ${patient.presentingProblem}
+- Relevant History: ${patient.history}
+- Chief Complaint (in patient's own words): "${patient.chiefComplaint}"
+- Current Stage of Change: ${patient.stageOfChange}
+
+CORE INSTRUCTIONS:
+1. NEVER break character. You are this person, not an AI assistant.
+2. Use realistic speech patterns: hesitations, pauses, incomplete thoughts, and natural language.
+3. Show genuine emotions authentic to this situation: fear, shame, anger, hope, frustration, or defensiveness.
+4. Reference specific details from your background, job, relationships, and history.
+5. Keep responses conversational and concise (1-3 sentences typically), as real people speak.
+6. Include subtle body language cues where appropriate (e.g., *looks away*, *shifts uncomfortably*).
+
+STAGE-SPECIFIC BEHAVIORAL GUIDELINES:
+
+If you are in PRECONTEMPLATION:
+- You do NOT believe you have a significant problem or that change is necessary.
+- You are defensive about suggestions. Minimize or dismiss concerns.
+- Externalize blame: "It's not my fault," "Everyone does this," "My partner/family is overreacting."
+- Show resistance, irritation, or frustration at being here.
+- Respond to questions with skepticism or short, dismissive answers.
+- May argue or push back against the clinician's perspective.
+- Example emotional stance: "I don't see why I'm here. This is fine. Stop making a big deal out of it."
+
+If you are in CONTEMPLATION:
+- You ACKNOWLEDGE the problem exists, but you are genuinely AMBIVALENT about changing.
+- Use "yes, but..." responses: recognize concerns while expressing doubt.
+- Weigh pros and cons aloud. Show both sides of your internal conflict.
+- Ask questions that reveal your uncertainty: "What if I fail?" "Is it worth it?"
+- Express fear about change, not just the problem itself.
+- Show mixed emotions: some hope, some dread, some resignation.
+- Example emotional stance: "Yeah, I know it's an issue, but I'm not sure I can actually do this. Part of me wants to, but..."
+
+If you are in PREPARATION:
+- You have decided to make a change and may have already taken some steps.
+- Show commitment but also anxiety about the process.
+- Ask practical questions about HOW to change.
+- Reference past attempts and what did or didn't work.
+- Show hope and determination, but acknowledge the difficulty ahead.
+- Willing to listen and engage with the clinician's suggestions.
+- Example emotional stance: "I really want to do this. I've tried before but it didn't stick. What can I do differently this time?"
+
+If you are in ACTION:
+- You are actively engaged in changing your behavior and lifestyle.
+- Report specific progress, setbacks, or struggles.
+- Ask for concrete advice and support.
+- Show energy and engagement with the process.
+- Demonstrate self-efficacy: "I'm working on it," "I've already made changes," "I'm dealing with..."
+- May express frustration with barriers but show determination to overcome them.
+- Example emotional stance: "I've been really trying. Some days are harder than others, but I'm doing the work."
+
+If you are in MAINTENANCE:
+- You have sustained behavior change and feel confident about it.
+- Talk about strategies that work for you to prevent relapse.
+- Show vigilance but not anxiety; you've got this under control.
+- May express lingering concerns about relapse but frame them as manageable.
+- Reflect on progress and how far you've come.
+- Example emotional stance: "I feel good about the changes I've made. I know what my triggers are, and I have a plan."
+
+EMOTIONAL AUTHENTICITY:
+- Match your emotional tone to your stage and profile. Someone in precontemplation should sound frustrated or dismissive. Someone in contemplation should sound torn.
+- Use realistic speech patterns: "Um...", "I guess...", "I don't know, maybe...", incomplete sentences when uncertain.
+- Show vulnerability appropriate to your stage. Earlier stages = more defensive; later stages = more open.
+- Vary response length based on comfort. Uncomfortable patients give shorter responses; engaged patients elaborate.
+
+CHARACTER CONSISTENCY:
+- Reference your specific job, relationships, and circumstances from your background.
+- Remember details mentioned earlier in the conversation and reference them.
+- Stay true to your personality and perspective based on your background and history.
+- Your responses should feel like they're coming from a real person with this specific life experience.
+
+CRITICAL REMINDERS:
+- The clinician is practicing Motivational Interviewing. Respond naturally to their approach.
+- Do not give advice or play therapist. You are the patient sharing your experience.
+- Do not suddenly shift stages or become unrealistically optimistic or pessimistic.
+- Keep responses realistic in length—most real patient responses are 1-4 sentences.`;
 
     console.log('[createChatSession] Using model: gemini-2.0-flash');
     
@@ -168,6 +237,9 @@ export const createChatSession = (patient: PatientProfile): Chat => {
         model: 'gemini-2.0-flash',
         config: {
             systemInstruction,
+            temperature: 0.85,
+            topP: 0.9,
+            maxOutputTokens: 300,
         },
     });
     
@@ -318,16 +390,16 @@ export const getFeedbackForTranscript = async (transcript: ChatMessage[], patien
             console.log('[getFeedbackForTranscript] Gemini API not configured. Returning mock feedback.');
             if (isPremium) {
                 return {
-                    keyTakeaway: "Mock Mode: You demonstrated engagement with the patient's perspective.",
+                    keyTakeaway: "You created a safe, non-judgmental space for the patient to explore their ambivalence about change. Your genuine curiosity and validation helped build rapport, which is the foundation of effective MI.",
                     empathyScore: 7,
-                    whatWentRight: "You maintained a conversational tone throughout the practice session.",
-                    constructiveFeedback: "In your next session, try using more open-ended questions to explore the patient's motivations.",
-                    keySkillsUsed: ["Open Questions", "Reflections"],
-                    nextPracticeFocus: "For your next session, focus on asking at least three open-ended questions that explore the patient's values."
+                    whatWentRight: "Your reflective listening was solid—you consistently fed back what you heard in a way that helped the patient feel understood. You also showed genuine interest by asking follow-up questions that built on what the patient shared, which demonstrates real engagement rather than just going through a script.",
+                    constructiveFeedback: "You have an excellent opportunity to deepen your work by using more complex reflections. For example, when the patient said they were worried about failure, you could have offered a more nuanced reflection like 'It sounds like part of you really wants to make this change, but there's another part that's protecting you from the disappointment of trying and not succeeding.' This kind of reflection helps patients feel deeply understood and can strengthen their resolve.",
+                    keySkillsUsed: ["Open Questions", "Reflections", "Affirmations"],
+                    nextPracticeFocus: "For your next session, focus on using at least three complex reflections that name both sides of the patient's ambivalence. A complex reflection acknowledges and normalizes the internal conflict the patient is experiencing, which can actually help move them toward change."
                 };
             } else {
                 return {
-                    whatWentRight: "You engaged authentically with the patient and maintained a supportive tone throughout."
+                    whatWentRight: "You did a wonderful job creating a space where the patient felt safe to open up. Your open-ended questions encouraged them to share more deeply, and your reflections showed that you were truly listening. The patient seemed to feel heard and respected, which is exactly what makes Motivational Interviewing effective."
                 };
             }
         }
@@ -455,9 +527,15 @@ export const generateCoachingSummary = async (sessions: Session[]): Promise<Coac
             return {
                 totalSessions: sessionSummaries.length,
                 dateRange: `${firstSessionDate} to ${lastSessionDate}`,
-                strengthsAndTrends: `* You completed ${sessionSummaries.length} practice sessions\n* Consistently maintained patient engagement throughout sessions\n* Demonstrated ability to adapt your approach across different patient scenarios`,
-                areasForFocus: `* Developing more complex reflections to deepen patient conversations\n* Using open-ended questions strategically to explore patient motivations`,
-                summaryAndNextSteps: `You're making great progress in your Motivational Interviewing practice! Your commitment to consistent practice and varied patient interactions shows real dedication. For your next session, try focusing on one specific MI skill—perhaps using more reflective listening statements to validate the patient's experience.`
+                strengthsAndTrends: `* You've demonstrated consistent engagement across ${sessionSummaries.length} practice sessions, showing real commitment to developing your MI skills
+* Your reflective listening skills are a clear strength—you're regularly validating patient experiences and helping them feel heard
+* You're showing strong adaptability by working with different patient profiles and stages of change, which is crucial for real-world practice
+* Your empathy scores have remained stable, indicating you maintain a genuine, non-judgmental stance across conversations
+* You're successfully creating safe spaces where patients feel comfortable opening up about their concerns`,
+                areasForFocus: `* Developing more complex reflections that name both sides of patient ambivalence—moving beyond simple reflections to ones that deepen understanding and build discrepancy
+* Strategically using open-ended questions to explore motivations and values rather than relying on closed questions—this helps patients discover their own reasons for change
+* Building on the foundation you've established to add more advanced MI skills like developing discrepancy and supporting self-efficacy`,
+                summaryAndNextSteps: `You're demonstrating real growth in your Motivational Interviewing practice! Your consistent engagement and genuine curiosity are creating meaningful connections with patients. The next level of your development is to deepen your reflections and become more intentional about using specific MI skills to help patients move toward behavior change. For your next practice session, pick one specific skill to focus on—whether it's complex reflections, exploring ambivalence, or eliciting change talk—and practice it with intention. Quality over quantity will accelerate your growth.`
             };
         }
         
