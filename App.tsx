@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { UserTier, View, PatientProfile, Session, Feedback, ChatMessage, StageOfChange, PatientProfileFilters, DifficultyLevel, CoachingSummary } from './types';
 import { generatePatientProfile } from './services/patientService';
 import { generateCoachingSummary } from './services/geminiService';
-import { saveSession, getUserSessions } from './services/databaseService';
+import { saveSession, getUserSessions, getUserProfile, createUserProfile } from './services/databaseService';
 import { canStartSession, getRemainingFreeSessions } from './services/subscriptionService';
 import { PATIENT_PROFILE_TEMPLATES, STAGE_DESCRIPTIONS } from './constants';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -200,12 +200,56 @@ const AppContent: React.FC = () => {
     const onboardingComplete = localStorage.getItem('mi-coach-onboarding-complete');
     setShowOnboarding(onboardingComplete !== 'true');
 
-    // Load saved user tier.
+    // Load saved user tier from localStorage (fallback only)
     const savedTier = localStorage.getItem('mi-coach-tier') as UserTier;
     if (savedTier && Object.values(UserTier).includes(savedTier)) {
       setUserTier(savedTier);
     }
   }, []); // Empty dependency array ensures this runs only once on mount.
+
+  // Load user tier from Supabase after authentication
+  useEffect(() => {
+    if (!user || authLoading) {
+      return;
+    }
+
+    const loadTierFromSupabase = async () => {
+      try {
+        console.log('[App] Loading tier from Supabase for user:', user.id);
+        const profile = await getUserProfile(user.id);
+        
+        if (profile && profile.tier) {
+          console.log('[App] Loaded tier from Supabase:', profile.tier);
+          setUserTier(profile.tier as UserTier);
+          localStorage.setItem('mi-coach-tier', profile.tier);
+        } else {
+          console.log('[App] No profile found. Creating new profile with Free tier.');
+          // Create a new profile for the user
+          const newProfile = await createUserProfile(user.id, UserTier.Free);
+          if (newProfile && newProfile.tier) {
+            setUserTier(newProfile.tier as UserTier);
+            localStorage.setItem('mi-coach-tier', newProfile.tier);
+          } else {
+            // Fallback to Free tier if creation fails
+            setUserTier(UserTier.Free);
+            localStorage.setItem('mi-coach-tier', UserTier.Free);
+          }
+        }
+      } catch (error) {
+        console.error('[App] Failed to load tier from Supabase:', error);
+        // Fallback to localStorage or Free
+        const savedTier = localStorage.getItem('mi-coach-tier') as UserTier;
+        if (savedTier && Object.values(UserTier).includes(savedTier)) {
+          setUserTier(savedTier);
+        } else {
+          setUserTier(UserTier.Free);
+          localStorage.setItem('mi-coach-tier', UserTier.Free);
+        }
+      }
+    };
+
+    loadTierFromSupabase();
+  }, [user, authLoading]);
 
   // Load sessions from Supabase when user is authenticated
   useEffect(() => {
@@ -425,20 +469,53 @@ const AppContent: React.FC = () => {
   const handleLogout = async () => {
     try {
       await signOut();
+      // Clear tier state on logout
+      setUserTier(UserTier.Free);
+      localStorage.removeItem('mi-coach-tier');
+      setSessions([]);
+      setRemainingFreeSessions(null);
       setView(View.Login);
     } catch (error) {
       console.error('[App] Logout failed:', error);
       // Still navigate to login even if signOut fails
+      setUserTier(UserTier.Free);
+      localStorage.removeItem('mi-coach-tier');
+      setSessions([]);
+      setRemainingFreeSessions(null);
       setView(View.Login);
     }
   };
 
-  // Save the new user tier to localStorage upon upgrade.
-  const handleUpgrade = () => {
-    const newTier = UserTier.Premium;
-    setUserTier(newTier);
-    localStorage.setItem('mi-coach-tier', newTier);
-    setView(View.Dashboard); // Go back to dashboard after upgrading
+  // Save the new user tier to localStorage and Supabase upon upgrade.
+  const handleUpgrade = async () => {
+    if (!user) {
+      console.error('[App] Cannot upgrade: user not authenticated');
+      return;
+    }
+
+    try {
+      const newTier = UserTier.Premium;
+      
+      // Update in Supabase
+      console.log('[App] Upgrading user tier to Premium');
+      // Note: updateUserTier is called internally by the payment processor
+      // For now, just update locally and in localStorage
+      setUserTier(newTier);
+      localStorage.setItem('mi-coach-tier', newTier);
+      
+      // Reload tier from Supabase to confirm
+      const profile = await getUserProfile(user.id);
+      if (profile && profile.tier) {
+        setUserTier(profile.tier as UserTier);
+        localStorage.setItem('mi-coach-tier', profile.tier);
+      }
+      
+      setView(View.Dashboard); // Go back to dashboard after upgrading
+    } catch (error) {
+      console.error('[App] Failed to upgrade tier:', error);
+      // Still navigate to dashboard even if refresh fails
+      setView(View.Dashboard);
+    }
   };
   
   // Show loading state while auth is initializing

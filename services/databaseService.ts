@@ -169,14 +169,13 @@ export const updateUserTier = async (userId: string, tier: UserTier): Promise<vo
 /**
  * Get user profile data
  */
-export const getUserProfile = async (userId: string): Promise<DbUserProfile> => {
+export const getUserProfile = async (userId: string): Promise<DbUserProfile | null> => {
     try {
         console.log('[databaseService] Fetching profile for user:', userId);
         
         if (!isSupabaseConfigured()) {
-            const errorMsg = 'Supabase is not configured. Cannot fetch user profile.';
-            console.warn('[databaseService]', errorMsg);
-            throw new Error(errorMsg);
+            console.warn('[databaseService] Supabase is not configured. Cannot fetch user profile.');
+            return null;
         }
 
         const supabase = getSupabaseClient();
@@ -187,12 +186,18 @@ export const getUserProfile = async (userId: string): Promise<DbUserProfile> => 
             .single();
 
         if (error) {
+            // If the error is "not found", return null to signal profile doesn't exist yet
+            if (error.code === 'PGRST116') {
+                console.log('[databaseService] User profile not found for user:', userId);
+                return null;
+            }
             console.error('[databaseService] Failed to fetch profile:', error);
             throw new Error(`Failed to fetch user profile: ${error.message}`);
         }
 
         if (!data) {
-            throw new Error('User profile not found');
+            console.log('[databaseService] User profile not found (no data)');
+            return null;
         }
 
         console.log('[databaseService] User profile retrieved successfully');
@@ -200,7 +205,51 @@ export const getUserProfile = async (userId: string): Promise<DbUserProfile> => 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error('[databaseService] Error in getUserProfile:', errorMessage);
-        throw error;
+        return null; // Return null instead of throwing so the app can handle gracefully
+    }
+};
+
+/**
+ * Create a new user profile
+ */
+export const createUserProfile = async (userId: string, tier: UserTier = UserTier.Free): Promise<DbUserProfile | null> => {
+    try {
+        console.log('[databaseService] Creating profile for user:', userId, 'with tier:', tier);
+        
+        if (!isSupabaseConfigured()) {
+            console.warn('[databaseService] Supabase is not configured. Cannot create user profile.');
+            return null;
+        }
+
+        const supabase = getSupabaseClient();
+        const now = new Date().toISOString();
+        
+        const { data, error } = await supabase
+            .from('profiles')
+            .insert({
+                user_id: userId,
+                tier,
+                created_at: now,
+                updated_at: now,
+            })
+            .select('*')
+            .single();
+
+        if (error) {
+            console.error('[databaseService] Failed to create profile:', error);
+            throw new Error(`Failed to create user profile: ${error.message}`);
+        }
+
+        if (!data) {
+            throw new Error('No profile data returned after creation');
+        }
+
+        console.log('[databaseService] User profile created successfully');
+        return data as DbUserProfile;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[databaseService] Error in createUserProfile:', errorMessage);
+        return null;
     }
 };
 
