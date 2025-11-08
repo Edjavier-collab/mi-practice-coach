@@ -117,13 +117,28 @@ export const getSupabaseClient = () => {
     try {
         const supabaseUrl = getSupabaseUrl();
         const supabaseAnonKey = getSupabaseAnonKey();
-        
-        supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
-        
+
+        // Create Supabase client with auth and realtime options
+        // Configure realtime to minimize connection attempts
+        supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+            auth: {
+                autoRefreshToken: true,
+                persistSession: true,
+                detectSessionInUrl: true
+            },
+            realtime: {
+                // Set very long timeout to prevent aggressive reconnection attempts
+                timeout: 60000,
+                heartbeatIntervalMs: 60000,
+                // Disable auto-reconnect by returning a very large delay
+                reconnectAfterMs: () => 3600000 // 1 hour
+            }
+        });
+
         if (isDevelopment) {
             console.log('[supabase] Supabase client initialized successfully');
         }
-        
+
         return supabaseClient;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error during Supabase initialization';
