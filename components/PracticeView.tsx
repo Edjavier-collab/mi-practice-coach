@@ -64,7 +64,8 @@ const PracticeView: React.FC<PracticeViewProps> = ({ patient, userTier, onFinish
         setIsPatientTyping(true);
 
         try {
-            const patientResponse = await getPatientResponse(chat, text);
+            // Pass patient profile to ensure responses are personalized for this specific patient
+            const patientResponse = await getPatientResponse(chat, text, patient);
             const newPatientMessage: ChatMessage = { author: 'patient', text: patientResponse };
             setTranscript(prev => [...prev, newPatientMessage]);
         } catch (error) {
@@ -74,7 +75,7 @@ const PracticeView: React.FC<PracticeViewProps> = ({ patient, userTier, onFinish
         } finally {
             setIsPatientTyping(false);
         }
-    }, [chat, isPatientTyping]);
+    }, [chat, patient, isPatientTyping]);
     
     const handleVoiceSend = () => {
         if (isListening) {

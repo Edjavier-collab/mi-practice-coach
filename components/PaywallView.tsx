@@ -1,9 +1,12 @@
 
-import React from 'react';
+import React, { useState } from 'react';
+import { redirectToCheckout } from '../services/stripeService';
+import { User } from '@supabase/supabase-js';
 
 interface PaywallViewProps {
     onBack: () => void;
     onUpgrade: () => void;
+    user: User | null;
 }
 
 const FeatureItem: React.FC<{ icon: string; text: React.ReactNode }> = ({ icon, text }) => (
@@ -13,7 +16,30 @@ const FeatureItem: React.FC<{ icon: string; text: React.ReactNode }> = ({ icon, 
     </li>
 );
 
-const PaywallView: React.FC<PaywallViewProps> = ({ onBack, onUpgrade }) => {
+const PaywallView: React.FC<PaywallViewProps> = ({ onBack, onUpgrade, user }) => {
+    const [loading, setLoading] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const handleSubscribe = async (plan: 'monthly' | 'annual') => {
+        if (!user) {
+            setError('Please log in to subscribe');
+            return;
+        }
+
+        setLoading(plan);
+        setError(null);
+
+        try {
+            console.log('[PaywallView] Starting checkout for plan:', plan);
+            await redirectToCheckout(user.id, plan);
+            // Note: redirectToCheckout will redirect the page, so code below won't execute
+        } catch (err) {
+            console.error('[PaywallView] Checkout error:', err);
+            setError(err instanceof Error ? err.message : 'Failed to start checkout. Please try again.');
+            setLoading(null);
+        }
+    };
+
     return (
         <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4 sm:p-6">
             <div className="absolute top-6 right-6">
@@ -41,9 +67,15 @@ const PaywallView: React.FC<PaywallViewProps> = ({ onBack, onUpgrade }) => {
                     </ul>
                 </div>
 
+                {error && (
+                    <div className="mb-4 bg-red-50 border-l-4 border-red-400 p-4 rounded">
+                        <p className="text-red-700 text-sm">{error}</p>
+                    </div>
+                )}
+
                 <div className="space-y-4">
                     {/* Annual Plan */}
-                    <div className="border-2 border-sky-500 bg-sky-50 rounded-2xl p-5 relative cursor-pointer" onClick={onUpgrade}>
+                    <div className="border-2 border-sky-500 bg-sky-50 rounded-2xl p-5 relative">
                         <div className="absolute top-0 -translate-y-1/2 left-1/2 -translate-x-1/2 bg-sky-500 text-white text-xs font-bold px-3 py-1 rounded-full uppercase">
                             Best Value
                         </div>
@@ -57,13 +89,17 @@ const PaywallView: React.FC<PaywallViewProps> = ({ onBack, onUpgrade }) => {
                                 <p className="text-gray-600 text-sm">/year</p>
                             </div>
                         </div>
-                         <button onClick={onUpgrade} className="mt-4 w-full bg-sky-500 text-white font-bold py-3 rounded-lg hover:bg-sky-600 transition">
-                            Subscribe Annually
+                         <button 
+                            onClick={() => handleSubscribe('annual')}
+                            disabled={loading !== null}
+                            className="mt-4 w-full bg-sky-500 text-white font-bold py-3 rounded-lg hover:bg-sky-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {loading === 'annual' ? 'Processing...' : 'Subscribe Annually'}
                         </button>
                     </div>
 
                     {/* Monthly Plan */}
-                    <div className="border-2 border-gray-300 bg-white rounded-2xl p-5 cursor-pointer" onClick={onUpgrade}>
+                    <div className="border-2 border-gray-300 bg-white rounded-2xl p-5">
                          <div className="flex justify-between items-center">
                             <div>
                                 <h3 className="font-bold text-lg text-gray-900">Monthly Plan</h3>
@@ -74,8 +110,12 @@ const PaywallView: React.FC<PaywallViewProps> = ({ onBack, onUpgrade }) => {
                                 <p className="text-gray-600 text-sm">/month</p>
                             </div>
                         </div>
-                        <button onClick={onUpgrade} className="mt-4 w-full bg-sky-500 text-white font-bold py-3 rounded-lg hover:bg-sky-600 transition">
-                           Subscribe Monthly
+                        <button 
+                            onClick={() => handleSubscribe('monthly')}
+                            disabled={loading !== null}
+                            className="mt-4 w-full bg-sky-500 text-white font-bold py-3 rounded-lg hover:bg-sky-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {loading === 'monthly' ? 'Processing...' : 'Subscribe Monthly'}
                         </button>
                     </div>
                 </div>

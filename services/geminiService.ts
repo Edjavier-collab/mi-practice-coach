@@ -26,11 +26,31 @@ const MOCK_RESPONSES = [
     "Look, I hear what you're saying, and I'm not trying to be defensive. It's just... this is hard for me to talk about. I don't usually open up like this, so it's making me uncomfortable. But I can tell you genuinely care, and that makes it easier. I'm just trying to figure out if I'm ready to actually do something about this."
 ];
 
-// Get a mock response based on user input
-const getMockResponse = (userMessage: string): string => {
+// Get a mock response based on user input and optionally patient context
+const getMockResponse = (userMessage: string, patient?: PatientProfile): string => {
     // Simple hash function to get consistent responses for similar inputs
     const hash = userMessage.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return MOCK_RESPONSES[hash % MOCK_RESPONSES.length];
+    let baseResponse = MOCK_RESPONSES[hash % MOCK_RESPONSES.length];
+    
+    // If patient context is provided, personalize the response slightly
+    if (patient) {
+        // Stage-specific modulation
+        if (patient.stageOfChange === 'Precontemplation') {
+            // More defensive/dismissive
+            const defensive = [
+                `I don't really see it as a big deal, like ${patient.background.toLowerCase()} doesn't necessarily mean I have to...`,
+                `Look, ${patient.presentingProblem.toLowerCase()} is just how things are. Everyone deals with this.`,
+                `I'm not sure why this is such a focus. I've managed fine so far.`
+            ];
+            return defensive[hash % defensive.length];
+        } else if (patient.stageOfChange === 'Preparation') {
+            // More hopeful
+            const hopeful = baseResponse.replace(/I'm (scared|worried|anxious)/, "I'm actually thinking about this more") || baseResponse;
+            return hopeful;
+        }
+    }
+    
+    return baseResponse;
 };
 
 // Get API key from environment variables with enhanced validation
@@ -131,16 +151,16 @@ const getAI = (): GoogleGenAI => {
 };
 
 export const createChatSession = (patient: PatientProfile): Chat => {
-    console.log('[createChatSession] Creating chat for patient:', patient.name);
+    console.log('[createChatSession] Creating chat for patient:', patient.name, 'Stage:', patient.stageOfChange);
     
     if (!isGeminiConfigured()) {
-        console.warn('[createChatSession] Gemini API not configured. Using mock chat mode.');
-        // Return a mock chat object that will use mock responses
+        console.warn('[createChatSession] Gemini API not configured. Using mock chat mode with personalized responses.');
+        // Return a mock chat object that will use personalized mock responses
         return {
             sendMessage: async (message: { message: string } | string) => {
                 const text = typeof message === 'string' ? message : message.message;
                 return {
-                    text: getMockResponse(text),
+                    text: getMockResponse(text, patient),
                     candidates: []
                 } as GenerateContentResponse;
             }
@@ -247,12 +267,12 @@ CRITICAL REMINDERS:
     return chat;
 };
 
-export const getPatientResponse = async (chat: Chat, message: string): Promise<string> => {
+export const getPatientResponse = async (chat: Chat, message: string, patient?: PatientProfile): Promise<string> => {
     try {
         // If Gemini not configured, use mock response
         if (!isGeminiConfigured()) {
             console.log('[getPatientResponse] Using mock response (Gemini API not configured)');
-            return getMockResponse(message);
+            return getMockResponse(message, patient);
         }
         
         // Validate API key before making API call

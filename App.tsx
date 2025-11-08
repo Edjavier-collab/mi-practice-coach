@@ -251,6 +251,84 @@ const AppContent: React.FC = () => {
     loadTierFromSupabase();
   }, [user, authLoading]);
 
+  // Handle Stripe checkout success redirect
+  useEffect(() => {
+    if (!user || authLoading) {
+      return;
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('session_id');
+    const plan = urlParams.get('plan');
+
+    if (sessionId && plan) {
+      console.log('[App] Stripe checkout success detected. Session:', sessionId, 'Plan:', plan);
+      
+      // Clear URL params
+      window.history.replaceState({}, '', window.location.pathname);
+      
+      // Refresh user tier from Supabase with retry logic
+      const refreshTierWithRetry = async () => {
+        const maxRetries = 3;
+        const delayBetweenRetries = 3000; // 3 seconds
+        let retryCount = 0;
+        let tierUpdated = false;
+
+        while (retryCount < maxRetries && !tierUpdated) {
+          try {
+            if (retryCount > 0) {
+              console.log(`[App] Retry attempt ${retryCount} to fetch updated tier...`);
+              // Wait before retrying
+              await new Promise(resolve => setTimeout(resolve, delayBetweenRetries));
+            } else {
+              // Initial wait for webhook to process
+              console.log('[App] Waiting for webhook to process...');
+              await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+
+            const profile = await getUserProfile(user.id);
+            
+            if (profile && profile.tier === 'premium') {
+              console.log('[App] Tier refreshed after payment:', profile.tier);
+              setUserTier(profile.tier as UserTier);
+              localStorage.setItem('mi-coach-tier', profile.tier);
+              tierUpdated = true;
+              
+              // Show success and navigate to dashboard
+              alert(`🎉 Payment successful! Your ${plan} subscription is now active. Enjoy unlimited practice sessions!`);
+              setView(View.Dashboard);
+            } else if (profile && profile.tier) {
+              console.warn('[App] Tier is still:', profile.tier, '(expected premium)');
+              retryCount++;
+            } else {
+              console.warn('[App] No profile found or tier is empty');
+              retryCount++;
+            }
+          } catch (error) {
+            console.error('[App] Error refreshing tier after payment:', error);
+            retryCount++;
+          }
+        }
+
+        // If tier wasn't updated after retries
+        if (!tierUpdated) {
+          console.warn('[App] Tier was not updated after', maxRetries, 'attempts');
+          console.warn('[App] Webhook may still be processing or there was an error');
+          alert('Payment received! Your subscription is being activated. Please refresh the page if you don\'t see premium features immediately.');
+          setView(View.Dashboard);
+          
+          // Still try to refresh tier from localStorage as fallback
+          const savedTier = localStorage.getItem('mi-coach-tier') as UserTier;
+          if (savedTier && Object.values(UserTier).includes(savedTier)) {
+            setUserTier(savedTier);
+          }
+        }
+      };
+
+      refreshTierWithRetry();
+    }
+  }, [user, authLoading]);
+
   // Load sessions from Supabase when user is authenticated
   useEffect(() => {
     if (!user || authLoading) {
@@ -336,9 +414,16 @@ const AppContent: React.FC = () => {
       return;
     }
 
+    // Guard: wait until userTier is loaded (avoid using stale tier from state)
+    if (!userTier || userTier === '') {
+      console.warn('[App] User tier not yet loaded, waiting...');
+      return;
+    }
+
     // Check if user can start a new session
     const canStart = await canStartSession(user.id, userTier);
     if (!canStart) {
+      console.log('[App] User cannot start session (limit reached), showing paywall');
       setView(View.Paywall);
       return;
     }
@@ -563,7 +648,7 @@ const AppContent: React.FC = () => {
       case View.Paywall:
         // For simplicity, 'onBack' from paywall always returns to dashboard.
         // A more complex implementation could use a 'previousView' state.
-        return <PaywallView onBack={() => setView(View.Dashboard)} onUpgrade={handleUpgrade} />;
+        return <PaywallView onBack={() => setView(View.Dashboard)} onUpgrade={handleUpgrade} user={user} />;
       case View.Calendar:
         return <CalendarView 
                   sessions={sessions} 

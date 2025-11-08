@@ -1,4 +1,5 @@
 import { getSessionCount, getUserSessions } from './databaseService';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { UserTier } from '@/types';
 
 // Free tier limit: 3 sessions per month
@@ -39,8 +40,11 @@ export const canStartSession = async (userId: string, userTier: UserTier): Promi
         return true;
     } catch (error) {
         console.error('[subscriptionService] Error checking if user can start session:', error);
-        // On error, allow session to proceed (fail-open approach)
-        return true;
+        // If Supabase is configured, fail-closed (deny session) on errors to prevent abuse
+        // If Supabase is not configured, fail-open to allow mock/offline testing
+        const shouldFailClosed = isSupabaseConfigured();
+        console.warn('[subscriptionService] Using', shouldFailClosed ? 'fail-closed' : 'fail-open', 'strategy');
+        return !shouldFailClosed;
     }
 };
 

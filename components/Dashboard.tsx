@@ -37,13 +37,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onStartPractice, userTier, sessio
             <div className="flex flex-col gap-4 w-full max-w-sm">
                 <button 
                     onClick={onStartPractice}
-                    className="bg-sky-500 text-white font-bold py-3 px-6 rounded-2xl shadow-lg hover:bg-sky-600 transition-transform transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-sky-300"
+                    disabled={userTier === UserTier.Free && displayRemaining === 0}
+                    className={`font-bold py-3 px-6 rounded-2xl shadow-lg transition-transform transform hover:scale-105 focus:outline-none focus:ring-4 ${
+                        userTier === UserTier.Free && displayRemaining === 0
+                            ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
+                            : 'bg-sky-500 text-white hover:bg-sky-600 focus:ring-sky-300'
+                    }`}
                 >
                     <span className="block text-lg">Start a New Practice</span>
                     {userTier === UserTier.Free && (
-                        <span className="block text-sm font-semibold text-yellow-300 mt-1">{displayRemaining} Practices Remaining</span>
+                        <span className={`block text-sm font-semibold mt-1 ${displayRemaining === 0 ? 'text-red-300' : 'text-yellow-300'}`}>
+                            {displayRemaining} of 3 Remaining
+                        </span>
                     )}
                 </button>
+                
+                {userTier === UserTier.Free && displayRemaining === 0 && (
+                    <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded">
+                        <p className="text-red-700 font-semibold text-sm">Free practices limit reached for this month</p>
+                        <p className="text-red-600 text-xs mt-1">Upgrade to Premium for unlimited access</p>
+                    </div>
+                )}
             </div>
         </div>
     );
