@@ -9,7 +9,7 @@ interface LoginViewProps {
 }
 
 const LoginView: React.FC<LoginViewProps> = ({ onLogin, onNavigate }) => {
-    const { signIn, signUp } = useAuth();
+    const { signIn, signUp, resendSignUpConfirmation } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isSignUp, setIsSignUp] = useState(false);
@@ -17,11 +17,75 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onNavigate }) => {
     const [error, setError] = useState<string | null>(null);
     const [emailConfirmationSent, setEmailConfirmationSent] = useState(false);
     const [confirmationEmail, setConfirmationEmail] = useState<string>('');
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const [resendLoading, setResendLoading] = useState(false);
+    const [checkingStatus, setCheckingStatus] = useState(false);
+    const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
 
     // Email format validation
     const validateEmail = (email: string): boolean => {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         return emailRegex.test(email);
+    };
+
+    // Handle resend cooldown timer
+    React.useEffect(() => {
+        if (resendCooldown > 0) {
+            intervalRef.current = setInterval(() => {
+                setResendCooldown((prev) => {
+                    if (prev <= 1) {
+                        if (intervalRef.current) {
+                            clearInterval(intervalRef.current);
+                            intervalRef.current = null;
+                        }
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        }
+
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+        };
+    }, [resendCooldown]);
+
+    // Handle resend confirmation email
+    const handleResendConfirmation = async () => {
+        if (resendCooldown > 0 || !confirmationEmail) return;
+
+        setResendLoading(true);
+        setError(null);
+        try {
+            await resendSignUpConfirmation(confirmationEmail);
+            setResendCooldown(60); // 60 second cooldown
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'Failed to resend confirmation email. Please try again.';
+            setError(errorMessage);
+        } finally {
+            setResendLoading(false);
+        }
+    };
+
+    // Handle checking if user has verified their email
+    const handleCheckStatus = async () => {
+        setCheckingStatus(true);
+        setError(null);
+        try {
+            // Try to sign in with the same credentials to check if email is confirmed
+            // This will fail if email is not confirmed, or succeed if it is
+            // Note: We don't have the password stored, so we'll just refresh the auth state
+            // The AuthProvider's onAuthStateChange listener will handle the rest
+            window.location.reload();
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'Unable to check status. Please try again.';
+            setError(errorMessage);
+        } finally {
+            setCheckingStatus(false);
+        }
     };
 
     // Google sign-in placeholder (to be implemented later)
@@ -56,32 +120,22 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onNavigate }) => {
         try {
             if (isSignUp) {
                 const result = await signUp(email, password);
-                // Always show confirmation message when Supabase is configured
-                // Supabase sends a confirmation email by default, even if email confirmation is disabled
-                if (result.requiresConfirmation || isSupabaseConfigured()) {
-                    // Email confirmation is required or Supabase is configured - show message
+                // Only show confirmation screen if email confirmation is actually required
+                if (result.requiresConfirmation) {
+                    // Email confirmation is required - show message
                     setEmailConfirmationSent(true);
                     setConfirmationEmail(result.email);
                     // Clear password for security
                     setPassword('');
-                    // Don't call onLogin() if confirmation is required - user needs to confirm email first
-                    // If user is already signed in but Supabase is configured, they'll see the message
-                    // and can dismiss it to continue
-                    if (!result.requiresConfirmation) {
-                        // User is signed in but Supabase is configured - still show message
-                        // onLogin() will be called after user dismisses the message
-                    }
+                    // Don't call onLogin() - user needs to confirm email first
                 } else {
-                    // Mock mode - user is automatically signed in, no confirmation needed
-                    // onLogin() will be called automatically when user state changes
-                    // via the useEffect in App.tsx
+                    // User is already signed in (email confirmation disabled or auto-confirmed)
+                    // Proceed directly to dashboard
                     onLogin();
                 }
             } else {
                 await signIn(email, password);
-                // onLogin() will be called automatically when user state changes
-                // via the useEffect in App.tsx
-                onLogin();
+                // Navigation is handled automatically by App.tsx useEffect when user state changes
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Authentication failed. Please try again.';
@@ -106,36 +160,63 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onNavigate }) => {
                             <svg className="w-6 h-6 text-green-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            <div>
+                            <div className="flex-1">
                                 <p className="font-semibold mb-2">Account created successfully!</p>
                                 <p className="text-sm mb-3">
                                     We've sent a confirmation email to <span className="font-medium">{confirmationEmail}</span>
                                 </p>
-                                <p className="text-sm">
-                                    Please check your email and click the confirmation link to sign in.
+                                <p className="text-sm mb-2">
+                                    Please check your email and click the confirmation link to activate your account.
+                                </p>
+                                <p className="text-xs text-green-700 mt-2">
+                                    <strong>Tip:</strong> Don't see the email? Check your spam folder or try resending below.
                                 </p>
                             </div>
                         </div>
                     </div>
 
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setEmailConfirmationSent(false);
-                            setConfirmationEmail('');
-                            setIsSignUp(false);
-                            setEmail('');
-                            setPassword('');
-                            setError(null);
-                            // If user is already signed in (Supabase configured but email confirmation disabled),
-                            // call onLogin() to proceed to dashboard
-                            // The useEffect in App.tsx will handle navigation if user is signed in
-                            onLogin();
-                        }}
-                        className="w-full bg-sky-500 text-white font-bold py-3 rounded-lg hover:bg-sky-600 transition-colors"
-                    >
-                        {isSupabaseConfigured() ? 'Continue' : 'Back to Login'}
-                    </button>
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">
+                            {error}
+                        </div>
+                    )}
+
+                    <div className="space-y-3">
+                        <button
+                            type="button"
+                            onClick={handleResendConfirmation}
+                            disabled={resendCooldown > 0 || resendLoading || loading}
+                            className="w-full bg-gray-100 text-gray-700 font-semibold py-3 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {resendLoading ? 'Sending...' : resendCooldown > 0 ? `Resend Email (${resendCooldown}s)` : 'Resend Email'}
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={handleCheckStatus}
+                            disabled={checkingStatus || loading}
+                            className="w-full bg-sky-500 text-white font-bold py-3 rounded-lg hover:bg-sky-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {checkingStatus ? 'Checking...' : "I've Verified My Email"}
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setEmailConfirmationSent(false);
+                                setConfirmationEmail('');
+                                setIsSignUp(false);
+                                setEmail('');
+                                setPassword('');
+                                setError(null);
+                                setResendCooldown(0);
+                            }}
+                            disabled={loading || resendLoading || checkingStatus}
+                            className="w-full text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 text-sm py-2 disabled:opacity-50"
+                        >
+                            Back to Login
+                        </button>
+                    </div>
                 </div>
             </div>
         );

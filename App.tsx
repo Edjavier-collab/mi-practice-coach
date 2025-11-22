@@ -323,7 +323,46 @@ const AppContent: React.FC = () => {
       // Clear URL params
       window.history.replaceState({}, '', window.location.pathname);
       
-      // Refresh user tier from Supabase with enhanced retry logic
+      // First, try to update tier directly via API (works even without webhooks)
+      const updateTierDirectly = async () => {
+        try {
+          const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+          console.log('[App] 🔄 Attempting to update tier directly from checkout session...');
+          
+          const response = await fetch(`${backendUrl}/api/update-tier-from-session`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ sessionId }),
+          });
+
+          if (!response.ok) {
+            const error = await response.json().catch(() => ({ message: 'Failed to update tier' }));
+            throw new Error(error.message || 'Failed to update tier');
+          }
+
+          const result = await response.json();
+          console.log('[App] ✅ Tier updated successfully via direct API call:', result);
+          
+          // Update local state immediately
+          setUserTier(UserTier.Premium);
+          localStorage.setItem('mi-coach-tier', UserTier.Premium);
+          setRemainingFreeSessions(null);
+          
+          // Show success and navigate to dashboard
+          alert(`🎉 Payment successful! Your ${plan} subscription is now active. Enjoy unlimited practice sessions!`);
+          setView(View.Dashboard);
+          return true;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.warn('[App] ⚠️ Direct tier update failed, falling back to polling:', errorMessage);
+          console.warn('[App] Error details:', error);
+          return false;
+        }
+      };
+
+      // Refresh user tier from Supabase with enhanced retry logic (fallback)
       const refreshTierWithRetry = async () => {
         const maxRetries = 5;
         const initialDelay = 2000; // 2 seconds initial delay for webhook processing
@@ -396,7 +435,13 @@ const AppContent: React.FC = () => {
         }
       };
 
-      refreshTierWithRetry();
+      // Try direct update first, then fall back to polling if needed
+      (async () => {
+        const directUpdateSuccess = await updateTierDirectly();
+        if (!directUpdateSuccess) {
+          refreshTierWithRetry();
+        }
+      })();
     }
   }, [user, authLoading]);
 

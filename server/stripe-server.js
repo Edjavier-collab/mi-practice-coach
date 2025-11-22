@@ -124,6 +124,67 @@ const validateSupabaseSetup = () => {
 };
 
 /**
+ * Update user tier to premium in Supabase
+ * This is a reusable function used by both webhook and direct API calls
+ */
+const updateUserTierToPremium = async (userId) => {
+    // Validate Supabase setup
+    const setupValidation = validateSupabaseSetup();
+    if (!setupValidation.isValid) {
+        const errorMsg = `Supabase setup validation failed: ${setupValidation.errors.join(', ')}`;
+        console.error('[stripe-server]', errorMsg);
+        throw new Error(errorMsg);
+    }
+
+    const { createClient } = await import('@supabase/supabase-js');
+    
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    console.log('[stripe-server] Using Supabase Service Role Key for tier update');
+    
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    });
+    
+    // Update user tier to premium with retry logic
+    console.log('[stripe-server] Attempting to update user tier for user:', userId);
+    const { data, error: updateError } = await retrySupabaseOperation(async () => {
+        return await supabase
+            .from('profiles')
+            .update({ 
+                tier: 'premium',
+                updated_at: new Date().toISOString()
+            })
+            .eq('user_id', userId)
+            .select('*');
+    });
+    
+    if (updateError) {
+        console.error('[stripe-server] Supabase update error:', updateError);
+        console.error('[stripe-server] Error code:', updateError.code);
+        console.error('[stripe-server] Error status:', updateError.status);
+        console.error('[stripe-server] Error message:', updateError.message);
+        throw updateError;
+    }
+    
+    if (!data || data.length === 0) {
+        const warningMsg = `No rows updated for user: ${userId}. Possible causes: profile doesn't exist, RLS policies, or invalid service role key.`;
+        console.warn('[stripe-server] ⚠️', warningMsg);
+        throw new Error(warningMsg);
+    } else {
+        console.log('[stripe-server] ✅ Successfully updated user tier to premium');
+        console.log('[stripe-server] User:', userId);
+        console.log('[stripe-server] New tier:', data[0].tier);
+        console.log('[stripe-server] Updated at:', data[0].updated_at);
+        return data[0];
+    }
+};
+
+/**
  * Stripe Webhook Handler - MUST be defined BEFORE JSON parsing middleware
  * This endpoint receives events from Stripe when payments are completed
  */
@@ -180,71 +241,9 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
 
         console.log('[stripe-server] Checkout completed for user:', userId);
 
-        // Validate Supabase setup
-        const setupValidation = validateSupabaseSetup();
-        if (!setupValidation.isValid) {
-            console.error('[stripe-server] Supabase setup validation failed:');
-            setupValidation.errors.forEach(err => console.error(`  - ${err}`));
-            console.error('[stripe-server] Please set the following environment variables in .env.local:');
-            console.error('  VITE_SUPABASE_URL=your_supabase_url');
-            console.error('  SUPABASE_SERVICE_ROLE_KEY=your_service_role_key');
-            // Don't fail - acknowledge webhook so Stripe doesn't retry indefinitely
-            return res.json({ received: true, warning: 'Supabase not configured' });
-        }
-
-        // Update user tier in Supabase
+        // Update user tier in Supabase using helper function
         try {
-            const { createClient } = await import('@supabase/supabase-js');
-            
-            const supabaseUrl = process.env.VITE_SUPABASE_URL;
-            const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-            
-            console.log('[stripe-server] Using Supabase Service Role Key for tier update');
-            
-            const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-                auth: {
-                    autoRefreshToken: false,
-                    persistSession: false
-                }
-            });
-            
-            // Update user tier to premium with retry logic
-            console.log('[stripe-server] Attempting to update user tier for user:', userId);
-            const { data, error: updateError } = await retrySupabaseOperation(async () => {
-                return await supabase
-                    .from('profiles')
-                    .update({ 
-                        tier: 'premium',
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('user_id', userId)
-                    .select('*');
-            });
-            
-            if (updateError) {
-                console.error('[stripe-server] Supabase update error:', updateError);
-                console.error('[stripe-server] Error code:', updateError.code);
-                console.error('[stripe-server] Error status:', updateError.status);
-                console.error('[stripe-server] Error message:', updateError.message);
-                throw updateError;
-            }
-            
-            if (!data || data.length === 0) {
-                console.warn('[stripe-server] ⚠️  No rows updated for user:', userId);
-                console.warn('[stripe-server] Possible causes:');
-                console.warn('  1. User profile does not exist in database');
-                console.warn('  2. RLS (Row Level Security) policies prevent updates');
-                console.warn('  3. Service role key does not have proper permissions');
-                console.warn('[stripe-server] Please verify:');
-                console.warn(`  - Run: SELECT * FROM profiles WHERE user_id = '${userId}';`);
-                console.warn('  - Check RLS policies on the profiles table');
-                console.warn('  - Verify SUPABASE_SERVICE_ROLE_KEY is a valid service role key');
-            } else {
-                console.log('[stripe-server] ✅ Successfully updated user tier to premium');
-                console.log('[stripe-server] User:', userId);
-                console.log('[stripe-server] New tier:', data[0].tier);
-                console.log('[stripe-server] Updated at:', data[0].updated_at);
-            }
+            await updateUserTierToPremium(userId);
         } catch (updateError) {
             console.error('[stripe-server] ❌ Failed to update user tier:', updateError.message);
             console.error('[stripe-server] Full error:', {
@@ -407,6 +406,68 @@ app.post('/api/create-checkout-session', async (req, res) => {
         
         res.status(500).json({
             error: error.message || 'Failed to create checkout session',
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        });
+    }
+});
+
+/**
+ * Update Tier From Checkout Session
+ * This endpoint allows the frontend to directly update the tier after checkout
+ * completion, without waiting for webhooks. Useful for development when Stripe CLI isn't running.
+ */
+app.post('/api/update-tier-from-session', async (req, res) => {
+    try {
+        console.log('[stripe-server] Received tier update request:', { body: req.body });
+        const { sessionId } = req.body;
+
+        if (!sessionId) {
+            console.error('[stripe-server] Missing sessionId');
+            return res.status(400).json({ error: 'Missing sessionId' });
+        }
+
+        // Retrieve the checkout session from Stripe
+        console.log('[stripe-server] Retrieving checkout session:', sessionId);
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        // Verify session is completed and paid
+        if (session.payment_status !== 'paid') {
+            console.error('[stripe-server] Session payment status is not paid:', session.payment_status);
+            return res.status(400).json({ 
+                error: 'Session payment not completed',
+                payment_status: session.payment_status 
+            });
+        }
+
+        // Extract userId from metadata
+        const userId = session.metadata?.userId;
+        if (!userId) {
+            console.error('[stripe-server] No userId in session metadata');
+            return res.status(400).json({ error: 'Missing userId in session metadata' });
+        }
+
+        console.log('[stripe-server] Updating tier for user:', userId, 'from session:', sessionId);
+
+        // Update user tier using helper function
+        const updatedProfile = await updateUserTierToPremium(userId);
+
+        console.log('[stripe-server] ✅ Tier updated successfully via direct API call');
+        res.json({ 
+            success: true,
+            userId,
+            tier: updatedProfile.tier,
+            updated_at: updatedProfile.updated_at
+        });
+    } catch (error) {
+        console.error('[stripe-server] Error updating tier from session:', error);
+        console.error('[stripe-server] Error details:', {
+            message: error.message,
+            type: error.type,
+            code: error.code,
+            statusCode: error.statusCode,
+        });
+        res.status(500).json({
+            error: error.message || 'Failed to update tier from session',
             details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
         });
     }

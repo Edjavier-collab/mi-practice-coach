@@ -17,6 +17,7 @@ interface AuthContextType {
     signOut: () => Promise<void>;
     resetPassword: (email: string) => Promise<void>;
     updatePassword: (newPassword: string) => Promise<void>;
+    resendSignUpConfirmation: (email: string) => Promise<void>;
 }
 
 // Create the context
@@ -129,6 +130,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 localStorage.setItem('mock_user', JSON.stringify({ email }));
                 
                 console.log('[AuthProvider] Mock sign in successful');
+                // In mock mode, we set user immediately so we can set loading to false
+                setLoading(false);
                 return;
             }
 
@@ -140,16 +143,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (error) {
                 console.error('[AuthProvider] Sign in failed:', error.message);
+                setLoading(false); // Set loading to false on error
                 throw new Error(error.message);
             }
 
             console.log('[AuthProvider] User signed in successfully');
+            // Don't set loading to false here - let onAuthStateChange handle it
+            // This ensures loading stays true until user state is actually updated
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Sign in failed';
             console.error('[AuthProvider] Error in signIn:', errorMessage);
+            // Only set loading to false if we haven't already (for Supabase errors)
+            if (isSupabaseConfigured()) {
+                setLoading(false);
+            }
             throw error;
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -177,6 +185,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 localStorage.setItem('mock_user', JSON.stringify({ email }));
                 
                 console.log('[AuthProvider] Mock sign up successful');
+                // In mock mode, we set user immediately so we can set loading to false
+                setLoading(false);
                 // Mock mode doesn't require confirmation
                 return { requiresConfirmation: false, email };
             }
@@ -192,6 +202,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (error) {
                 console.error('[AuthProvider] Sign up failed:', error.message);
+                setLoading(false); // Set loading to false on error
                 throw new Error(error.message);
             }
 
@@ -229,23 +240,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // The difference is whether the user is immediately signed in or not
             if (requiresConfirmation) {
                 console.log('[AuthProvider] User signed up successfully, but email confirmation is required');
+                // User won't be logged in, so set loading to false
+                setLoading(false);
             } else {
                 console.log('[AuthProvider] User signed up and logged in successfully (email confirmation may still be sent)');
                 // Even if user is signed in, Supabase may have sent a confirmation email
                 // Check if user email is confirmed
                 if (data.user && !data.user.email_confirmed_at) {
                     // User is signed in but email is not confirmed - show confirmation message
+                    // Don't set loading to false here - let onAuthStateChange handle it since user is logged in
                     return { requiresConfirmation: true, email };
                 }
+                // User is signed in - don't set loading to false, let onAuthStateChange handle it
             }
 
             return { requiresConfirmation, email };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Sign up failed';
             console.error('[AuthProvider] Error in signUp:', errorMessage);
+            // Only set loading to false if we haven't already (for Supabase errors)
+            if (isSupabaseConfigured()) {
+                setLoading(false);
+            }
             throw error;
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -354,6 +371,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    /**
+     * Resend sign-up confirmation email
+     */
+    const resendSignUpConfirmation = async (email: string): Promise<void> => {
+        try {
+            console.log('[AuthProvider] Resending sign-up confirmation email:', email);
+            setLoading(true);
+
+            if (!isSupabaseConfigured()) {
+                // Mock resend - just log it
+                console.log('[AuthProvider] Mock resend confirmation - email sent to:', email);
+                await new Promise(resolve => setTimeout(resolve, 500));
+                return;
+            }
+
+            const supabase = getSupabaseClient();
+            const { error } = await supabase.auth.resend({
+                type: 'signup',
+                email: email,
+            });
+
+            if (error) {
+                console.error('[AuthProvider] Resend confirmation failed:', error.message);
+                throw new Error(error.message);
+            }
+
+            console.log('[AuthProvider] Confirmation email resent successfully');
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to resend confirmation email';
+            console.error('[AuthProvider] Error in resendSignUpConfirmation:', errorMessage);
+            throw error;
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const value: AuthContextType = {
         user,
         loading,
@@ -362,6 +415,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut,
         resetPassword,
         updatePassword,
+        resendSignUpConfirmation,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
