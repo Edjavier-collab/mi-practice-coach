@@ -226,6 +226,53 @@ export const deleteMockSubscription = (userId) => {
 };
 
 /**
+ * Upgrade monthly subscription to annual (scheduled for end of current period)
+ */
+export const upgradeToAnnual = (userId) => {
+    const subscription = mockSubscriptions.get(userId);
+    if (!subscription) {
+        throw new Error('No subscription found');
+    }
+
+    if (subscription.plan === 'annual') {
+        console.log('[mockSubscriptionService] Subscription is already annual for user:', userId);
+        return subscription;
+    }
+
+    if (subscription.plan !== 'monthly') {
+        throw new Error(`Cannot upgrade from ${subscription.plan} plan. Only monthly subscriptions can be upgraded.`);
+    }
+
+    // Schedule upgrade to take effect at end of current period
+    const currentPeriodEnd = new Date(subscription.currentPeriodEnd);
+    const annualPricing = PRICING.annual;
+    
+    // Update plan to annual
+    subscription.plan = 'annual';
+    subscription.originalPrice = annualPricing.original;
+    
+    // Calculate new price - if they have retention discount, apply it to annual
+    if (subscription.hasRetentionDiscount) {
+        subscription.currentPrice = annualPricing.discounted;
+    } else {
+        subscription.currentPrice = annualPricing.original;
+    }
+    
+    // Set new billing period end (365 days from current period end)
+    const newPeriodEnd = new Date(currentPeriodEnd);
+    newPeriodEnd.setDate(newPeriodEnd.getDate() + 365);
+    subscription.currentPeriodEnd = newPeriodEnd.toISOString();
+    
+    // Mark that upgrade is scheduled (for display purposes)
+    subscription.upgradeScheduled = true;
+    subscription.upgradeScheduledDate = currentPeriodEnd.toISOString();
+
+    mockSubscriptions.set(userId, subscription);
+    console.log('[mockSubscriptionService] Upgraded subscription to annual, effective at period end:', currentPeriodEnd.toISOString());
+    return subscription;
+};
+
+/**
  * Get all mock subscriptions (for debugging)
  */
 export const getAllMockSubscriptions = () => {

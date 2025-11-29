@@ -39,16 +39,20 @@ const SettingsView: React.FC<SettingsViewProps> = ({ userTier, onNavigateToPaywa
     const [logoutError, setLogoutError] = useState<string | null>(null);
     const [subscriptionPlan, setSubscriptionPlan] = useState<'monthly' | 'annual' | 'unknown' | null>(null);
     const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+    const [subscriptionCancelled, setSubscriptionCancelled] = useState(false);
+    const [hasPremiumMismatch, setHasPremiumMismatch] = useState(false);
 
     const handlePlaceholderClick = (feature: string) => {
         alert(`${feature} feature coming soon!`);
     };
 
-    // Fetch subscription plan for premium users
+    // Fetch subscription plan and cancellation status for all users
     useEffect(() => {
         const fetchSubscriptionPlan = async () => {
-            if (!user || userTier !== UserTier.Premium) {
+            if (!user) {
                 setSubscriptionPlan(null);
+                setSubscriptionCancelled(false);
+                setHasPremiumMismatch(false);
                 return;
             }
 
@@ -57,11 +61,38 @@ const SettingsView: React.FC<SettingsViewProps> = ({ userTier, onNavigateToPaywa
                 const subscription = await getUserSubscription(user.id);
                 console.log('[SettingsView] Subscription data received:', subscription);
                 
-                if (subscription && !(typeof subscription === 'object' && '_premiumTierMismatch' in subscription)) {
+                // Check for premium tier mismatch
+                if (subscription && typeof subscription === 'object' && '_premiumTierMismatch' in subscription) {
+                    console.log('[SettingsView] Premium tier mismatch detected');
+                    setHasPremiumMismatch(true);
+                    setSubscriptionCancelled(false);
+                    setSubscriptionPlan(null);
+                    return;
+                }
+                
+                if (subscription) {
+                    // Check if subscription is cancelled AND period hasn't ended
+                    const isCancelled = subscription.cancelAtPeriodEnd === true;
+                    const currentPeriodEnd = subscription.currentPeriodEnd;
+                    const periodHasEnded = currentPeriodEnd ? new Date(currentPeriodEnd) <= new Date() : false;
+                    
+                    // Only mark as cancelled if subscription exists, is cancelled, and period hasn't ended
+                    const cancelled = isCancelled && !periodHasEnded;
+                    
+                    console.log('[SettingsView] Cancellation check:', {
+                        cancelAtPeriodEnd: isCancelled,
+                        currentPeriodEnd,
+                        periodHasEnded,
+                        cancelled
+                    });
+                    
+                    setSubscriptionCancelled(cancelled);
+                    setHasPremiumMismatch(false);
+                    
                     // Extract plan type from subscription
                     let plan = subscription.plan;
                     console.log('[SettingsView] Plan value from subscription:', plan, 'Type:', typeof plan);
-                    console.log('[SettingsView] Full subscription object:', JSON.stringify(subscription, null, 2));
+                    console.log('[SettingsView] Cancellation status:', cancelled);
                     
                     // Normalize plan value (handle case sensitivity, whitespace, etc.)
                     if (plan && typeof plan === 'string') {
@@ -118,14 +149,18 @@ const SettingsView: React.FC<SettingsViewProps> = ({ userTier, onNavigateToPaywa
                         }
                     }
                 } else {
-                    // Subscription not found or error - set to unknown
-                    console.warn('[SettingsView] ⚠️ Subscription not found or has premium tier mismatch');
-                    setSubscriptionPlan('unknown');
+                    // Subscription not found (404) - no restore available
+                    console.log('[SettingsView] No subscription found');
+                    setHasPremiumMismatch(false);
+                    setSubscriptionCancelled(false);
+                    setSubscriptionPlan(null);
                 }
             } catch (err) {
                 console.error('[SettingsView] Error fetching subscription plan:', err);
                 // On error, don't set plan (will show just "Premium Member")
                 setSubscriptionPlan(null);
+                setSubscriptionCancelled(false);
+                setHasPremiumMismatch(false);
             } finally {
                 setSubscriptionLoading(false);
             }
@@ -323,31 +358,34 @@ const SettingsView: React.FC<SettingsViewProps> = ({ userTier, onNavigateToPaywa
                                 <span className="text-sky-600">Manage Subscription</span>
                                 <i className="fa fa-chevron-right text-gray-400"></i>
                             </SettingsRow>
-                            <SettingsRow onClick={handleRestorePurchase} isLast>
-                                <div className="flex-1">
-                                    <span className="text-sky-600">Restore Purchase</span>
-                                    {restoreLoading && (
-                                        <span className="ml-2 text-xs text-gray-500">
-                                            <i className="fa fa-spinner fa-spin"></i> Restoring...
-                                        </span>
-                                    )}
-                                    {restoreSuccess && (
-                                        <span className="ml-2 text-xs text-green-600">
-                                            <i className="fa fa-check"></i> Restored!
-                                        </span>
-                                    )}
-                                    {restoreError && (
-                                        <span className="ml-2 text-xs text-red-600">
-                                            <i className="fa fa-exclamation-triangle"></i> {restoreError}
-                                        </span>
-                                    )}
-                                </div>
-                                {!restoreLoading && <i className="fa fa-chevron-right text-gray-400"></i>}
-                            </SettingsRow>
+                            {/* Only show Restore Purchase if subscription exists, is cancelled, and period hasn't ended */}
+                            {subscriptionCancelled && (
+                                <SettingsRow onClick={handleRestorePurchase} isLast>
+                                    <div className="flex-1">
+                                        <span className="text-sky-600">Restore Purchase</span>
+                                        {restoreLoading && (
+                                            <span className="ml-2 text-xs text-gray-500">
+                                                <i className="fa fa-spinner fa-spin"></i> Restoring...
+                                            </span>
+                                        )}
+                                        {restoreSuccess && (
+                                            <span className="ml-2 text-xs text-green-600">
+                                                <i className="fa fa-check"></i> Restored!
+                                            </span>
+                                        )}
+                                        {restoreError && (
+                                            <span className="ml-2 text-xs text-red-600">
+                                                <i className="fa fa-exclamation-triangle"></i> {restoreError}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {!restoreLoading && <i className="fa fa-chevron-right text-gray-400"></i>}
+                                </SettingsRow>
+                            )}
                         </>
                     ) : (
                         <>
-                            <SettingsRow onClick={onNavigateToPaywall}>
+                            <SettingsRow onClick={onNavigateToPaywall} isLast={!subscriptionCancelled}>
                                 <div>
                                     <p className="text-gray-800">Current Plan</p>
                                     <p className="text-sky-600 text-sm font-semibold">Free Tier</p>
@@ -360,27 +398,30 @@ const SettingsView: React.FC<SettingsViewProps> = ({ userTier, onNavigateToPaywa
                                     <i className="fa fa-chevron-right text-gray-400"></i>
                                 )}
                             </SettingsRow>
-                             <SettingsRow onClick={handleRestorePurchase} isLast>
-                                <div className="flex-1">
-                                    <span className="text-gray-800">Restore Purchase</span>
-                                    {restoreLoading && (
-                                        <span className="ml-2 text-xs text-gray-500">
-                                            <i className="fa fa-spinner fa-spin"></i> Restoring...
-                                        </span>
-                                    )}
-                                    {restoreSuccess && (
-                                        <span className="ml-2 text-xs text-green-600">
-                                            <i className="fa fa-check"></i> Restored!
-                                        </span>
-                                    )}
-                                    {restoreError && (
-                                        <span className="ml-2 text-xs text-red-600">
-                                            <i className="fa fa-exclamation-triangle"></i> {restoreError}
-                                        </span>
-                                    )}
-                                </div>
-                                {!restoreLoading && <i className="fa fa-chevron-right text-gray-400"></i>}
-                            </SettingsRow>
+                            {/* Free tier users can restore if a cancelled subscription still exists */}
+                            {subscriptionCancelled && (
+                                <SettingsRow onClick={handleRestorePurchase} isLast>
+                                    <div className="flex-1">
+                                        <span className="text-sky-600">Restore Purchase</span>
+                                        {restoreLoading && (
+                                            <span className="ml-2 text-xs text-gray-500">
+                                                <i className="fa fa-spinner fa-spin"></i> Restoring...
+                                            </span>
+                                        )}
+                                        {restoreSuccess && (
+                                            <span className="ml-2 text-xs text-green-600">
+                                                <i className="fa fa-check"></i> Restored!
+                                            </span>
+                                        )}
+                                        {restoreError && (
+                                            <span className="ml-2 text-xs text-red-600">
+                                                <i className="fa fa-exclamation-triangle"></i> {restoreError}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {!restoreLoading && <i className="fa fa-chevron-right text-gray-400"></i>}
+                                </SettingsRow>
+                            )}
                         </>
                     )}
                 </SettingsSection>

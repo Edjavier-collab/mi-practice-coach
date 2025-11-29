@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '@supabase/supabase-js';
 import { SubscriptionDetails, UserTier } from '../types';
-import { getUserSubscription, cancelSubscription, restoreSubscription, createMockSubscription } from '../services/stripeService';
+import { getUserSubscription, cancelSubscription, restoreSubscription, createMockSubscription, upgradeToAnnual } from '../services/stripeService';
 
 interface CancelSubscriptionViewProps {
     user: User;
@@ -17,6 +17,8 @@ const CancelSubscriptionView: React.FC<CancelSubscriptionViewProps> = ({ user, u
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [premiumTierMismatch, setPremiumTierMismatch] = useState(false);
+    const [upgradeLoading, setUpgradeLoading] = useState(false);
+    const [showCancellationFlow, setShowCancellationFlow] = useState(false);
 
     useEffect(() => {
         loadSubscription();
@@ -135,6 +137,29 @@ const CancelSubscriptionView: React.FC<CancelSubscriptionViewProps> = ({ user, u
             setError(err instanceof Error ? err.message : 'Failed to restore subscription. Please try again.');
         } finally {
             setActionLoading(null);
+        }
+    };
+
+    const handleUpgradeToAnnual = async () => {
+        setUpgradeLoading(true);
+        setError(null);
+        setSuccess(null);
+        
+        try {
+            const result = await upgradeToAnnual(user.id);
+            const message = result?.message || 'Your subscription will be upgraded to Annual at the end of your current billing period.';
+            setSuccess(message);
+            // Reload subscription to show updated plan
+            await loadSubscription();
+            // Refresh tier if callback provided
+            if (onTierUpdated) {
+                setTimeout(() => onTierUpdated(), 1000);
+            }
+        } catch (err) {
+            console.error('[CancelSubscriptionView] Error upgrading:', err);
+            setError(err instanceof Error ? err.message : 'Failed to upgrade subscription. Please try again.');
+        } finally {
+            setUpgradeLoading(false);
         }
     };
 
@@ -336,8 +361,12 @@ const CancelSubscriptionView: React.FC<CancelSubscriptionViewProps> = ({ user, u
                     <div className="mx-auto mb-4 bg-sky-100 h-20 w-20 rounded-full flex items-center justify-center ring-8 ring-sky-100/50">
                         <i className="fa-solid fa-credit-card text-4xl text-sky-500"></i>
                     </div>
-                    <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">Cancel Subscription</h1>
-                    <p className="text-gray-600">We're sorry to see you go</p>
+                    <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">
+                        {showCancellationFlow ? 'Cancel Subscription' : 'Manage Subscription'}
+                    </h1>
+                    <p className="text-gray-600">
+                        {showCancellationFlow ? "We're sorry to see you go" : 'View and manage your subscription details'}
+                    </p>
                 </div>
 
                 {/* Current Subscription Details */}
@@ -372,8 +401,8 @@ const CancelSubscriptionView: React.FC<CancelSubscriptionViewProps> = ({ user, u
                     </div>
                 </div>
 
-                {/* Retention Offer */}
-                {!subscription.hasRetentionDiscount && !subscription.cancelAtPeriodEnd && (
+                {/* Retention Offer - Only show when user clicks Cancel */}
+                {showCancellationFlow && !subscription.hasRetentionDiscount && !subscription.cancelAtPeriodEnd && (
                     <div className="bg-gradient-to-r from-sky-50 to-blue-50 border-2 border-sky-300 rounded-2xl p-6 mb-6">
                         <div className="text-center mb-4">
                             <div className="inline-block bg-sky-500 text-white text-xs font-bold px-3 py-1 rounded-full uppercase mb-2">
@@ -419,28 +448,84 @@ const CancelSubscriptionView: React.FC<CancelSubscriptionViewProps> = ({ user, u
                 {/* Action Buttons */}
                 {!subscription.hasRetentionDiscount && !subscription.cancelAtPeriodEnd && (
                     <div className="space-y-4">
-                        <button
-                            onClick={handleAcceptOffer}
-                            disabled={actionLoading !== null}
-                            className="w-full bg-sky-500 text-white font-bold py-4 rounded-lg hover:bg-sky-600 transition disabled:opacity-50 disabled:cursor-not-allowed text-lg"
-                        >
-                            {actionLoading === 'accept' ? (
-                                <span><i className="fa fa-spinner fa-spin mr-2"></i>Applying Discount...</span>
-                            ) : (
-                                <span>Keep My Subscription (30% Off)</span>
-                            )}
-                        </button>
-                        <button
-                            onClick={handleCancel}
-                            disabled={actionLoading !== null}
-                            className="w-full bg-gray-200 text-gray-800 font-bold py-4 rounded-lg hover:bg-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {actionLoading === 'cancel' ? (
-                                <span><i className="fa fa-spinner fa-spin mr-2"></i>Cancelling...</span>
-                            ) : (
-                                <span>Cancel Anyway</span>
-                            )}
-                        </button>
+                        {!showCancellationFlow ? (
+                            // Initial view - Show Upgrade and Cancel buttons
+                            <>
+                                {/* Upgrade to Annual button - only show for monthly subscribers */}
+                                {detectedPlan === 'monthly' && (
+                                    <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-2xl p-6 mb-4">
+                                        <div className="text-center mb-4">
+                                            <h3 className="text-lg font-bold text-gray-900 mb-2">Upgrade to Annual</h3>
+                                            <p className="text-gray-700 text-sm mb-3">
+                                                Save money by switching to annual billing. Your upgrade will take effect at the end of your current billing period.
+                                            </p>
+                                            <div className="bg-white rounded-lg p-3 mb-3">
+                                                <div className="flex justify-between items-center text-sm">
+                                                    <span className="text-gray-600">Monthly (current)</span>
+                                                    <span className="font-semibold text-gray-900">{formatPrice(subscription.originalPrice)}/month</span>
+                                                </div>
+                                                <div className="flex justify-between items-center mt-2 text-sm">
+                                                    <span className="text-gray-600">Annual (upgrade)</span>
+                                                    <span className="font-semibold text-green-600">$99.99/year</span>
+                                                </div>
+                                                <div className="text-center mt-2 text-xs text-gray-600">
+                                                    Save ${(subscription.originalPrice * 12 - 99.99).toFixed(2)} per year
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={handleUpgradeToAnnual}
+                                                disabled={upgradeLoading || actionLoading !== null}
+                                                className="w-full bg-green-500 text-white font-bold py-3 rounded-lg hover:bg-green-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {upgradeLoading ? (
+                                                    <span><i className="fa fa-spinner fa-spin mr-2"></i>Upgrading...</span>
+                                                ) : (
+                                                    <span>Upgrade to Annual Plan</span>
+                                                )}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                                <button
+                                    onClick={() => setShowCancellationFlow(true)}
+                                    className="w-full bg-red-500 text-white font-bold py-4 rounded-lg hover:bg-red-600 transition text-lg"
+                                >
+                                    Cancel Subscription
+                                </button>
+                                <button
+                                    onClick={onBack}
+                                    className="w-full bg-gray-200 text-gray-800 font-bold py-3 rounded-lg hover:bg-gray-300 transition"
+                                >
+                                    Go Back to Settings
+                                </button>
+                            </>
+                        ) : (
+                            // Cancellation flow - Show retention offer buttons
+                            <>
+                                <button
+                                    onClick={handleAcceptOffer}
+                                    disabled={actionLoading !== null}
+                                    className="w-full bg-sky-500 text-white font-bold py-4 rounded-lg hover:bg-sky-600 transition disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+                                >
+                                    {actionLoading === 'accept' ? (
+                                        <span><i className="fa fa-spinner fa-spin mr-2"></i>Applying Discount...</span>
+                                    ) : (
+                                        <span>Keep My Subscription (30% Off)</span>
+                                    )}
+                                </button>
+                                <button
+                                    onClick={handleCancel}
+                                    disabled={actionLoading !== null}
+                                    className="w-full bg-gray-200 text-gray-800 font-bold py-4 rounded-lg hover:bg-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {actionLoading === 'cancel' ? (
+                                        <span><i className="fa fa-spinner fa-spin mr-2"></i>Cancelling...</span>
+                                    ) : (
+                                        <span>Cancel Anyway</span>
+                                    )}
+                                </button>
+                            </>
+                        )}
                     </div>
                 )}
 

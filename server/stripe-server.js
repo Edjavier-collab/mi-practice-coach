@@ -1932,6 +1932,164 @@ app.post('/api/restore-subscription', async (req, res) => {
 });
 
 /**
+ * Upgrade subscription from monthly to annual
+ */
+app.post('/api/upgrade-subscription', async (req, res) => {
+    try {
+        const { userId } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ error: 'Missing userId' });
+        }
+
+        console.log('[stripe-server] [upgrade-subscription] Upgrading subscription for user:', userId);
+
+        // Check mock subscriptions first if enabled
+        if (USE_MOCK_SUBSCRIPTIONS) {
+            console.log('[stripe-server] [upgrade-subscription] Mock mode enabled, checking mock service...');
+            // Lazy load mock service
+            if (!mockSubscriptionService) {
+                try {
+                    console.log('[stripe-server] [upgrade-subscription] Loading mock subscription service...');
+                    const mockServiceModule = await import('./mockSubscriptionService.js');
+                    mockSubscriptionService = mockServiceModule;
+                    console.log('[stripe-server] [upgrade-subscription] Mock subscription service loaded successfully');
+                } catch (error) {
+                    console.error('[stripe-server] [upgrade-subscription] Failed to load mock subscription service:', error.message);
+                    return res.status(500).json({ error: 'Failed to load mock subscription service' });
+                }
+            }
+            
+            if (mockSubscriptionService) {
+                const mockSub = mockSubscriptionService.getMockSubscription(userId);
+                if (mockSub) {
+                    // Check if subscription is monthly
+                    if (mockSub.plan !== 'monthly') {
+                        return res.status(400).json({ 
+                            error: `Cannot upgrade. Current plan is ${mockSub.plan}. Only monthly subscriptions can be upgraded to annual.`,
+                            currentPlan: mockSub.plan
+                        });
+                    }
+
+                    // Upgrade to annual
+                    const upgraded = mockSubscriptionService.upgradeToAnnual(userId);
+                    
+                    // Update plan in database
+                    try {
+                        await updateUserPlan(userId, 'annual');
+                        console.log('[stripe-server] [upgrade-subscription] ✅ Saved annual plan to database');
+                    } catch (planError) {
+                        console.warn('[stripe-server] [upgrade-subscription] ⚠️ Failed to save plan:', planError.message);
+                        // Don't fail the request if plan save fails
+                    }
+
+                    console.log('[stripe-server] [upgrade-subscription] ✅ Successfully upgraded subscription to annual');
+                    return res.json({
+                        success: true,
+                        subscription: upgraded,
+                        message: `Your subscription will be upgraded to Annual at the end of your current billing period (${new Date(upgraded.upgradeScheduledDate).toLocaleDateString()}). You'll be billed $${upgraded.originalPrice} per year starting then.`,
+                    });
+                } else {
+                    return res.status(404).json({ 
+                        error: 'No subscription found. Please create a subscription first.',
+                        mockMode: true
+                    });
+                }
+            }
+            
+            // If we're in mock mode but service failed to load, don't fall through to Stripe
+            return res.status(500).json({ 
+                error: 'Mock subscription service is not available',
+                mockMode: true
+            });
+        }
+
+        // Only proceed with Stripe if not in mock mode
+        if (!isStripeAvailable()) {
+            return res.status(503).json({ 
+                error: 'Stripe is not configured and mock mode is disabled',
+            });
+        }
+
+        // Real Stripe upgrade logic
+        // Get user email and find subscription
+        const userEmail = await getUserEmail(userId);
+        const customers = await stripe.customers.list({
+            email: userEmail,
+            limit: 1,
+        });
+
+        if (customers.data.length === 0) {
+            return res.status(404).json({ error: 'No customer found' });
+        }
+
+        const customer = customers.data[0];
+        const subscriptions = await stripe.subscriptions.list({
+            customer: customer.id,
+            status: 'active',
+            limit: 1,
+        });
+
+        if (subscriptions.data.length === 0) {
+            return res.status(404).json({ error: 'No active subscription found' });
+        }
+
+        const subscription = subscriptions.data[0];
+        const currentPriceId = subscription.items.data[0]?.price?.id;
+        
+        // Check if already annual
+        if (currentPriceId === PRICE_IDS.annual) {
+            return res.status(400).json({ 
+                error: 'Subscription is already on the annual plan',
+                currentPlan: 'annual'
+            });
+        }
+
+        // Check if monthly
+        if (currentPriceId !== PRICE_IDS.monthly) {
+            return res.status(400).json({ 
+                error: 'Can only upgrade from monthly to annual plan',
+                currentPlan: 'unknown'
+            });
+        }
+
+        // Update subscription to annual, effective at period end
+        const updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+            items: [{
+                id: subscription.items.data[0].id,
+                price: PRICE_IDS.annual,
+            }],
+            proration_behavior: 'none', // Don't prorate - change at period end
+            billing_cycle_anchor: 'unchanged', // Keep current billing cycle
+            metadata: {
+                ...subscription.metadata,
+                plan: 'annual',
+            },
+        });
+
+        // Update plan in database
+        try {
+            await updateUserPlan(userId, 'annual');
+            console.log('[stripe-server] [upgrade-subscription] ✅ Saved annual plan to database');
+        } catch (planError) {
+            console.warn('[stripe-server] [upgrade-subscription] ⚠️ Failed to save plan:', planError.message);
+        }
+
+        console.log('[stripe-server] [upgrade-subscription] ✅ Successfully upgraded Stripe subscription to annual');
+        res.json({
+            success: true,
+            subscriptionId: updatedSubscription.id,
+            message: `Your subscription will be upgraded to Annual at the end of your current billing period (${new Date(updatedSubscription.current_period_end * 1000).toLocaleDateString()}).`,
+        });
+    } catch (error) {
+        console.error('[stripe-server] Error upgrading subscription:', error);
+        res.status(500).json({
+            error: error.message || 'Failed to upgrade subscription',
+        });
+    }
+});
+
+/**
  * Debug endpoint to list all mock subscriptions (development only)
  */
 app.get('/api/debug/mock-subscriptions', async (req, res) => {

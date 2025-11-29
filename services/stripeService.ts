@@ -220,6 +220,31 @@ export const restoreSubscription = async (userId: string): Promise<any> => {
 };
 
 /**
+ * Upgrade subscription from monthly to annual
+ */
+export const upgradeToAnnual = async (userId: string): Promise<any> => {
+    const backendUrl = getBackendUrl();
+    
+    const response = await fetch(`${backendUrl}/api/upgrade-subscription`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            userId,
+        }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to upgrade subscription' }));
+        const errorMessage = errorData.error || errorData.message || 'Failed to upgrade subscription';
+        throw new Error(errorMessage);
+    }
+
+    return await response.json();
+};
+
+/**
  * Create a mock subscription (development only)
  */
 export const createMockSubscription = async (userId: string, plan: 'monthly' | 'annual'): Promise<any> => {
