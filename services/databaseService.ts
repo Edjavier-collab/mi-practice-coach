@@ -1,5 +1,6 @@
 import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase';
 import { Session, UserTier } from '@/types';
+import { ErrorHandler } from '../utils/errorHandler';
 
 // Database type definitions
 interface DbSession {
@@ -42,20 +43,44 @@ export const saveSession = async (session: Session, userId: string): Promise<str
             .single();
 
         if (error) {
-            console.error('[databaseService] Failed to save session:', error);
-            throw new Error(`Failed to save session: ${error.message}`);
+            ErrorHandler.logError(error, { userId, action: 'saveSession', level: 'error' });
+            throw ErrorHandler.createError(
+                `Failed to save session: ${error.message}`,
+                'SAVE_SESSION_ERROR',
+                error,
+                userId,
+                'saveSession'
+            );
         }
 
         if (!data || !data.id) {
-            throw new Error('No session ID returned from database');
+            const error = ErrorHandler.createError(
+                'No session ID returned from database',
+                'NO_SESSION_ID',
+                { userId },
+                userId,
+                'saveSession'
+            );
+            ErrorHandler.logError(error, { userId, action: 'saveSession', level: 'error' });
+            throw error;
         }
 
         console.log('[databaseService] Session saved with ID:', data.id);
         return data.id;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[databaseService] Error in saveSession:', errorMessage);
-        throw error;
+        // Re-throw if it's already an AppError, otherwise wrap it
+        if (error && typeof error === 'object' && 'error' in error) {
+            throw error;
+        }
+        const appError = ErrorHandler.createError(
+            error instanceof Error ? error.message : 'Unknown error',
+            'SAVE_SESSION_UNKNOWN',
+            error,
+            userId,
+            'saveSession'
+        );
+        ErrorHandler.logError(appError, { userId, action: 'saveSession', level: 'error' });
+        throw appError;
     }
 };
 
@@ -79,8 +104,14 @@ export const getUserSessions = async (userId: string): Promise<Session[]> => {
             .order('created_at', { ascending: false });
 
         if (error) {
-            console.error('[databaseService] Failed to fetch sessions:', error);
-            throw new Error(`Failed to fetch sessions: ${error.message}`);
+            ErrorHandler.logError(error, { userId, action: 'getUserSessions', level: 'error' });
+            throw ErrorHandler.createError(
+                `Failed to fetch sessions: ${error.message}`,
+                'FETCH_SESSIONS_ERROR',
+                error,
+                userId,
+                'getUserSessions'
+            );
         }
 
         if (!data) {
@@ -92,9 +123,19 @@ export const getUserSessions = async (userId: string): Promise<Session[]> => {
         console.log(`[databaseService] Retrieved ${sessions.length} sessions for user`);
         return sessions;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[databaseService] Error in getUserSessions:', errorMessage);
-        throw error;
+        // Re-throw if it's already an AppError, otherwise wrap it
+        if (error && typeof error === 'object' && 'error' in error) {
+            throw error;
+        }
+        const appError = ErrorHandler.createError(
+            error instanceof Error ? error.message : 'Unknown error',
+            'GET_SESSIONS_UNKNOWN',
+            error,
+            userId,
+            'getUserSessions'
+        );
+        ErrorHandler.logError(appError, { userId, action: 'getUserSessions', level: 'error' });
+        throw appError;
     }
 };
 
@@ -191,8 +232,9 @@ export const getUserProfile = async (userId: string): Promise<DbUserProfile | nu
                 console.log('[databaseService] User profile not found for user:', userId);
                 return null;
             }
-            console.error('[databaseService] Failed to fetch profile:', error);
-            throw new Error(`Failed to fetch user profile: ${error.message}`);
+            ErrorHandler.logError(error, { userId, action: 'getUserProfile', level: 'error' });
+            // Return null instead of throwing so the app can handle gracefully
+            return null;
         }
 
         if (!data) {
@@ -203,8 +245,7 @@ export const getUserProfile = async (userId: string): Promise<DbUserProfile | nu
         console.log('[databaseService] User profile retrieved successfully');
         return data as DbUserProfile;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[databaseService] Error in getUserProfile:', errorMessage);
+        ErrorHandler.logError(error, { userId, action: 'getUserProfile', level: 'warn' });
         return null; // Return null instead of throwing so the app can handle gracefully
     }
 };
@@ -236,19 +277,27 @@ export const createUserProfile = async (userId: string, tier: UserTier = UserTie
             .single();
 
         if (error) {
-            console.error('[databaseService] Failed to create profile:', error);
-            throw new Error(`Failed to create user profile: ${error.message}`);
+            ErrorHandler.logError(error, { userId, action: 'createUserProfile', level: 'error' });
+            // Return null instead of throwing so the app can handle gracefully
+            return null;
         }
 
         if (!data) {
-            throw new Error('No profile data returned after creation');
+            const error = ErrorHandler.createError(
+                'No profile data returned after creation',
+                'NO_PROFILE_DATA',
+                { userId, tier },
+                userId,
+                'createUserProfile'
+            );
+            ErrorHandler.logError(error, { userId, action: 'createUserProfile', level: 'error' });
+            return null;
         }
 
         console.log('[databaseService] User profile created successfully');
         return data as DbUserProfile;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error('[databaseService] Error in createUserProfile:', errorMessage);
+        ErrorHandler.logError(error, { userId, action: 'createUserProfile', level: 'warn' });
         return null;
     }
 };

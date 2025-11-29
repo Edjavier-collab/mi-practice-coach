@@ -13,7 +13,7 @@ interface AuthContextType {
     user: User | null;
     loading: boolean;
     signIn: (email: string, password: string) => Promise<void>;
-    signUp: (email: string, password: string) => Promise<SignUpResult>;
+    signUp: (email: string, password: string, fullName?: string) => Promise<SignUpResult>;
     signOut: () => Promise<void>;
     resetPassword: (email: string) => Promise<void>;
     updatePassword: (newPassword: string) => Promise<void>;
@@ -165,7 +165,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
      * Sign up with email and password
      * Returns information about whether email confirmation is required
      */
-    const signUp = async (email: string, password: string): Promise<SignUpResult> => {
+    const signUp = async (email: string, password: string, fullName?: string): Promise<SignUpResult> => {
         try {
             console.log('[AuthProvider] Signing up user:', email);
             setLoading(true);
@@ -179,10 +179,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 
                 // In mock mode, accept any email/password
                 const mockUser = createMockUser(email);
+                // Add metadata
+                if (fullName) {
+                    mockUser.user_metadata = { ...mockUser.user_metadata, full_name: fullName };
+                }
                 setUser(mockUser);
                 
                 // Store in localStorage for persistence
-                localStorage.setItem('mock_user', JSON.stringify({ email }));
+                localStorage.setItem('mock_user', JSON.stringify({ email, user_metadata: mockUser.user_metadata }));
                 
                 console.log('[AuthProvider] Mock sign up successful');
                 // In mock mode, we set user immediately so we can set loading to false
@@ -197,6 +201,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 password,
                 options: {
                     emailRedirectTo: `${window.location.origin}/`,
+                    data: fullName ? { full_name: fullName } : undefined,
                 },
             });
 
