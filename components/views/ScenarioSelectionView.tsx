@@ -188,10 +188,10 @@ export const ScenarioSelectionView: React.FC<ScenarioSelectionViewProps> = ({ on
             <main className="max-w-2xl mx-auto">
                 <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-sm border border-gray-200 space-y-8">
                     <CustomSelect
-                        id="topic-select"
+                            id="topic-select"
                         label="Topic of Conversation"
                         icon="fa-solid fa-list-check"
-                        value={selectedTopic}
+                            value={selectedTopic}
                         onChange={setSelectedTopic}
                         options={[
                             { value: 'any', label: 'Any Topic' },
@@ -211,7 +211,7 @@ export const ScenarioSelectionView: React.FC<ScenarioSelectionViewProps> = ({ on
                                 ...allDifficulties.map(level => ({ value: level, label: level }))
                             ]}
                         />
-                        {selectedDifficulty !== 'any' && (
+                         {selectedDifficulty !== 'any' && (
                             <p className="text-base text-gray-600 mt-3 pl-1 leading-relaxed">{DIFFICULTY_DESCRIPTIONS[selectedDifficulty as DifficultyLevel]}</p>
                         )}
                     </div>
